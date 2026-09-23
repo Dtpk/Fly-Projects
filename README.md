@@ -1,5 +1,5 @@
 # Fly-Projects
-                                        -The fruit fly connectome and some unique projects using it.-
+             -The fruit fly connectome and some unique projects using it.-
 
 
 <p align="center">
