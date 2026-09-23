@@ -10,8 +10,9 @@
 
 
 NOTICE!!! All these projects use a VENV for no system bloat they will set up and run where the script is ran from!!
-Also if you don't provide the csv from "https://codex.flywire.ai" it will use a mock recreation not the real deal and will say it in the title bar.
-It should be called "connections_princeton.csv" I will see if I can provide it then.
+Also if you don't provide the csv files from "https://codex.flywire.ai" it will use a mock recreation not the real deal and will say it in the title bar.
+
+It should be called "connections_princeton.csv" and "neurons.csv" I will see if I can provide it then but they go next to the scripts.
 
 So in this repository you will see a few fruit fly based python projects using a real fruit fly brain "connectome" for the reasoning.
 
