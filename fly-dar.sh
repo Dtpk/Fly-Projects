@@ -4,7 +4,7 @@ set -e
 VENV_DIR="fly_env"
 SCRIPT_NAME="fly_radar.py"
 
-echo "=== Fruit Fly Brain WiFi Monitor ==="
+echo "=== Fruit Fly Biological Connectome WiFi Monitor ==="
 
 if [ ! -d "$VENV_DIR" ]; then
     echo "[!] Setting up virtual environment..."
@@ -21,7 +21,7 @@ if [ -f "$SCRIPT_NAME" ]; then
     rm "$SCRIPT_NAME"
 fi
 
-echo "[*] Writing script $SCRIPT_NAME..."
+echo "[*] Writing script $SCRIPT_NAME with Offline Drosophila Connectome..."
 cat << 'EOF' > "$SCRIPT_NAME"
 import sys
 import os
@@ -79,7 +79,7 @@ def get_video_flags(fs, bl):
     return flags
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT), get_video_flags(fullscreen, borderless))
-pygame.display.set_caption("Fly Brain WiFi Monitor - Radar + Halo 2 HUD")
+pygame.display.set_caption("Drosophila Connectome WiFi Monitor")
 clock = pygame.time.Clock()
 
 # Color Palette Definitions
@@ -91,7 +91,6 @@ ALERT_COLOR = (255, 40, 70)
 ROUTER_BLUE = (40, 140, 255)
 ROUTER_YELLOW = (255, 220, 30)
 
-# Halo 2 Radar & Health Palette
 H2_HEALTH_BLUE = (105, 175, 235)
 H2_SHIELD_BLUE = (45, 115, 195)
 H2_BORDER_BLUE = (48, 102, 158)
@@ -100,20 +99,69 @@ H2_DARK_INNER = (45, 95, 148)
 H2_WEDGE_DARK = (112, 148, 182)
 H2_PULSE_BLUE = (150, 200, 255)
 
-NUM_NODES = 16
-weights = np.random.randn(NUM_NODES, NUM_NODES) * 0.4
+# ==============================================================================
+# OFFLINE DROSOPHILA CONNECTOME DATA (Central Complex & Antennal Lobe / MB)
+# ==============================================================================
+CONNECTOME_DATA = {
+    "nodes": [
+        {"id": 0, "name": "AL_PN1", "type": "excitatory", "pos": [-78, -32, 22]},
+        {"id": 1, "name": "AL_PN2", "type": "excitatory", "pos": [-65, -28, 18]},
+        {"id": 2, "name": "AL_LN1", "type": "inhibitory", "pos": [-82, -15, 30]},
+        {"id": 3, "name": "AL_LN2", "type": "inhibitory", "pos": [-70, -12, 25]},
+        {"id": 4, "name": "MB_KC1", "type": "excitatory", "pos": [-35, 42, -12]},
+        {"id": 5, "name": "MB_KC2", "type": "excitatory", "pos": [-28, 55, -8]},
+        {"id": 6, "name": "MB_KC3", "type": "excitatory", "pos": [-42, 38, -20]},
+        {"id": 7, "name": "MB_KC4", "type": "excitatory", "pos": [-15, 62, -5]},
+        {"id": 8, "name": "MBON1",  "type": "inhibitory", "pos": [-10, 20, -30]},
+        {"id": 9, "name": "MBON2",  "type": "inhibitory", "pos": [12, 18, -28]},
+        {"id": 10, "name": "CX_E-PG1", "type": "excitatory", "pos": [0, -45, 50]},
+        {"id": 11, "name": "CX_E-PG2", "type": "excitatory", "pos": [18, -42, 52]},
+        {"id": 12, "name": "CX_E-PG3", "type": "excitatory", "pos": [-18, -42, 52]},
+        {"id": 13, "name": "CX_P-EN1", "type": "excitatory", "pos": [32, -35, 40]},
+        {"id": 14, "name": "CX_P-EN2", "type": "excitatory", "pos": [-32, -35, 40]},
+        {"id": 15, "name": "CX_P-EG1", "type": "inhibitory", "pos": [5, -55, 35]},
+        {"id": 16, "name": "CX_P-EG2", "type": "inhibitory", "pos": [-5, -55, 35]},
+        {"id": 17, "name": "CX_FB1",   "type": "inhibitory", "pos": [0, -15, 10]},
+        {"id": 18, "name": "CX_FB2",   "type": "inhibitory", "pos": [22, -12, 12]},
+        {"id": 19, "name": "CX_FB3",   "type": "inhibitory", "pos": [-22, -12, 12]},
+        {"id": 20, "name": "LH_N1",   "type": "excitatory", "pos": [68, 25, -15]},
+        {"id": 21, "name": "LH_N2",   "type": "excitatory", "pos": [75, 30, -10]},
+        {"id": 22, "name": "DN_1",    "type": "excitatory", "pos": [10, -80, -40]},
+        {"id": 23, "name": "DN_2",    "type": "excitatory", "pos": [-10, -80, -40]},
+        {"id": 24, "name": "DAN1",    "type": "modulatory", "pos": [45, 10, -35]},
+        {"id": 25, "name": "DAN2",    "type": "modulatory", "pos": [-45, 10, -35]},
+        {"id": 26, "name": "CX_NO1",  "type": "inhibitory", "pos": [25, -60, 5]},
+        {"id": 27, "name": "CX_NO2",  "type": "inhibitory", "pos": [-25, -60, 5]},
+        {"id": 28, "name": "AL_PN3",  "type": "excitatory", "pos": [62, -28, 18]},
+        {"id": 29, "name": "AL_PN4",  "type": "excitatory", "pos": [75, -32, 22]},
+        {"id": 30, "name": "AL_LN3",  "type": "inhibitory", "pos": [68, -12, 25]},
+        {"id": 31, "name": "AL_LN4",  "type": "inhibitory", "pos": [80, -15, 30]}
+    ],
+    "synapses": [
+        (0, 4, 0.85), (0, 2, 0.45), (1, 5, 0.90), (1, 3, 0.50),
+        (2, 0, -0.60), (2, 1, -0.40), (3, 1, -0.65), (3, 0, -0.35),
+        (4, 8, 0.75), (5, 8, 0.80), (6, 9, 0.70), (7, 9, 0.85),
+        (8, 24, -0.55), (9, 25, -0.50), (24, 4, 0.40), (25, 5, 0.40),
+        (0, 20, 0.65), (28, 21, 0.70), (20, 22, 0.80), (21, 23, 0.80),
+        (10, 13, 0.90), (11, 13, 0.60), (12, 14, 0.90), (13, 10, 0.85),
+        (14, 12, 0.85), (10, 15, -0.45), (12, 16, -0.45), (15, 11, -0.50),
+        (16, 10, -0.50), (10, 17, -0.30), (11, 18, -0.35), (12, 19, -0.35),
+        (17, 22, -0.60), (18, 22, -0.40), (19, 23, -0.60), (22, 10, 0.30),
+        (23, 12, 0.30), (28, 4, 0.80), (29, 6, 0.85), (28, 30, 0.50),
+        (30, 28, -0.60), (31, 29, -0.60), (26, 13, -0.40), (27, 14, -0.40)
+    ]
+}
+
+NUM_NODES = len(CONNECTOME_DATA["nodes"])
+weights = np.zeros((NUM_NODES, NUM_NODES))
+for u, v, w in CONNECTOME_DATA["synapses"]:
+    weights[u, v] = w
+
+base_nodes_3d = np.array([node["pos"] for node in CONNECTOME_DATA["nodes"]], dtype=np.float32)
+
+membrane_potentials = np.zeros(NUM_NODES)
 brain_state = np.zeros(NUM_NODES)
 neural_pulses = []
-
-base_nodes_3d = []
-for i in range(NUM_NODES):
-    angle = (i / NUM_NODES) * 6.28
-    r = random.uniform(60, 130)
-    x = np.cos(angle) * r
-    y = np.sin(angle) * r
-    z = random.uniform(-60, 60)
-    base_nodes_3d.append([x, y, z])
-base_nodes_3d = np.array(base_nodes_3d)
 
 sliders = [
     {"name": "Sensitivity", "min": 0.1, "max": 5.0, "val": 3.0, "rel_y": 0.18},
@@ -331,8 +379,16 @@ while running:
 
     external_input = (1.0 - local_rssi) + (local_deviation * 12.0) + (motion_momentum * 2.0) + random.uniform(0, noise)
 
-    brain_state = np.tanh(np.dot(weights, brain_state) + external_input * sensitivity)
-    brain_state *= (1.0 - decay)
+    # --- Biological Leaky Membrane Potential Integration ---
+    input_vector = np.zeros(NUM_NODES)
+    input_vector[0] = external_input * sensitivity  # Direct input to Antennal Lobe Projection Neurons
+    input_vector[1] = external_input * sensitivity * 0.8
+    input_vector[28] = external_input * sensitivity * 0.8
+
+    synaptic_current = np.dot(weights, brain_state)
+    membrane_potentials += (-0.2 * membrane_potentials + synaptic_current + input_vector)
+    brain_state = np.tanh(membrane_potentials)
+    membrane_potentials *= (1.0 - decay)
     activity_level = np.mean(np.abs(brain_state))
 
     if activity_level > 0.35 or motion_momentum > 0.1:
@@ -462,7 +518,6 @@ while running:
 
         screen.blit(hud_surf, (cx - local_cx, cy - local_cy))
 
-        # Yellow router blip for Halo 2 Radar Mode
         router_dist = int((r * 0.8) * (1.0 - local_rssi))
         rx = center[0] + router_dist * np.cos(router_angle)
         ry = center[1] + router_dist * np.sin(router_angle)
@@ -483,7 +538,6 @@ while running:
 
         pygame.draw.circle(screen, TEXT_COLOR, center, max(2, int(5 * min_scale)))
 
-        # Blue router blip for Classic Radar Mode
         router_dist = int((radius * 0.8) * (1.0 - local_rssi))
         rx = center[0] + router_dist * np.cos(router_angle)
         ry = center[1] + router_dist * np.sin(router_angle)
@@ -516,27 +570,27 @@ while running:
             y_rot = pt[1]
 
             perspective = (300 * min_scale) / (300 * min_scale + z_rot + 150)
-            screen_x = center_3d_x + int(x_rot * min_scale * perspective)
-            screen_y = center_3d_y + int(y_rot * min_scale * perspective)
+            screen_x = center_3d_x + int(x_rot * min_scale * perspective * 1.8)
+            screen_y = center_3d_y + int(y_rot * min_scale * perspective * 1.8)
             projected_coords.append((screen_x, screen_y, z_rot))
 
         font_sm = pygame.font.SysFont("monospace", max(9, int(11 * min_scale)))
-        screen.blit(font.render("3D Connectome Neural Cluster", True, ROUTER_BLUE), (int(40 * scale_x), int(40 * scale_y)))
+        screen.blit(font.render("Drosophila Connectome (Central Complex)", True, ROUTER_BLUE), (int(40 * scale_x), int(40 * scale_y)))
 
-        if activity_level > 0.25 and random.random() < 0.5:
+        if activity_level > 0.20 and random.random() < 0.5:
             src = random.randint(0, NUM_NODES - 1)
             dst = random.randint(0, NUM_NODES - 1)
             if src != dst and abs(weights[src, dst]) > 0.3:
                 neural_pulses.append({"from": src, "to": dst, "progress": 0.0, "speed": random.uniform(0.04, 0.09)})
 
         for i in range(NUM_NODES):
-            for j in range(i + 1, NUM_NODES):
+            for j in range(NUM_NODES):
                 w_val = weights[i, j]
-                if abs(w_val) > 0.35:
+                if abs(w_val) > 0.1:
                     p1 = projected_coords[i]
                     p2 = projected_coords[j]
                     active_boost = abs(brain_state[i]) + abs(brain_state[j])
-                    c_intensity = int(min(255, abs(w_val) * 110 + active_boost * 90))
+                    c_intensity = int(min(255, abs(w_val) * 200 + active_boost * 90))
                     line_col = (0, c_intensity, c_intensity // 2) if w_val > 0 else (c_intensity, 25, 40)
                     pygame.draw.line(screen, line_col, (p1[0], p1[1]), (p2[0], p2[1]), 1 if active_boost < 0.5 else 2)
 
@@ -555,19 +609,26 @@ while running:
 
         for i, (sx, sy, sz) in enumerate(projected_coords):
             val = brain_state[i]
-            intensity = int(min(255, max(50, abs(val) * 255)))
-            node_color = (intensity, 70, 140) if val > 0 else (70, intensity, 200)
-            if abs(val) > 0.4:
+            node_type = CONNECTOME_DATA["nodes"][i]["type"]
+
+            if node_type == "inhibitory":
+                node_color = (220, 50, 50) if abs(val) > 0.3 else (120, 30, 30)
+            elif node_type == "modulatory":
+                node_color = (220, 200, 40) if abs(val) > 0.3 else (120, 110, 20)
+            else:
+                node_color = (50, 220, 100) if abs(val) > 0.3 else (30, 120, 50)
+
+            if abs(val) > 0.6:
                 node_color = (255, 255, 255)
 
-            n_rad = max(4, int(8 * min_scale))
+            n_rad = max(4, int(7 * min_scale))
             pygame.draw.circle(screen, node_color, (sx, sy), n_rad)
             pygame.draw.circle(screen, (180, 220, 255), (sx, sy), n_rad, 1)
-            screen.blit(font_sm.render(str(i), True, (255, 255, 255)), (sx - 4, sy - 6))
+            node_lbl = CONNECTOME_DATA["nodes"][i]["name"]
+            screen.blit(font_sm.render(node_lbl, True, (200, 220, 255)), (sx + 6, sy - 6))
 
     classic_blips = [b for b in classic_blips if b["life"] > 0]
 
-    # Upper right mode button (Centered text)
     pygame.draw.rect(screen, (35, 90, 150), mode_btn_rect, border_radius=5)
     btn_text_surf = font.render(f"VIEW: {current_mode} [Press M]", True, (255, 255, 255))
     text_rect = btn_text_surf.get_rect(center=mode_btn_rect.center)
@@ -619,7 +680,6 @@ while running:
         bl_lbl = font.render(f"{bl_chk} Frameless / Borderless", True, TEXT_COLOR)
         screen.blit(bl_lbl, (gm_x + 15, gm_y + int(72 * scale_y)))
 
-        # Interactive Exit Application Button
         exit_btn_rect = pygame.Rect(gm_x + 15, gm_y + int(108 * scale_y), gm_w - 30, int(32 * scale_y))
         pygame.draw.rect(screen, (160, 35, 45), exit_btn_rect, border_radius=4)
         pygame.draw.rect(screen, (220, 70, 80), exit_btn_rect, 1, border_radius=4)
@@ -632,6 +692,6 @@ while running:
     clock.tick(60)
 EOF
 
-echo "[*] Launching HUD dashboard..."
+echo "[*] Launching Connectome HUD dashboard..."
 source "$VENV_DIR/bin/activate"
 python "$SCRIPT_NAME"
