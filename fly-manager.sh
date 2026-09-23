@@ -3,23 +3,41 @@ set -e
 
 VENV_DIR="fly_env"
 SCRIPT_NAME="fly_file_radar.py"
+CONFIG_PATH="watch_dirs.txt"
+CSV_PATH="connections_princeton.csv"
 
-# --- Virtual Environment Setup ---
+# 1. Check virtual environment & dependencies (added scipy for sparse matrices)
 if [ ! -d "$VENV_DIR" ]; then
     echo "=== Virtual environment not found. Creating $VENV_DIR... ==="
     python3 -m venv "$VENV_DIR"
 
-    echo "=== Activating and installing dependencies... ==="
+    echo "=== Activating and installing dependencies (--no-cache-dir)... ==="
     source "$VENV_DIR/bin/activate"
-    pip install --upgrade pip
-    pip install pygame numpy watchdog pyaudio
+    pip install --no-cache-dir --upgrade pip
+    pip install --no-cache-dir pygame numpy watchdog pyaudio pandas scipy
 else
     source "$VENV_DIR/bin/activate"
+    pip install --no-cache-dir -q pandas scipy
 fi
 
-echo "=== Updating Script for Automatic Desktop Audio Capture ==="
+# 2. Ensure watch_dirs.txt exists
+if [ ! -f "$CONFIG_PATH" ]; then
+    echo "=== Creating blank $CONFIG_PATH with usage comments... ==="
+    cat << 'EOF' > "$CONFIG_PATH"
+# Add one directory path per line below.
+# Format: /path/to/directory | cleanup_slow_transfers=false | mode=move | sens=2.50 | decay=0.15 | noise=0.10
+EOF
+fi
 
-cat << 'EOF' > "$SCRIPT_NAME"
+# 3. Check for CSV file
+if [ ! -f "$CSV_PATH" ]; then
+    echo "[!] Warning: $CSV_PATH not found in the current folder. The script will fall back to mock data."
+fi
+
+# 4. Only generate the Python script if it doesn't exist yet (protects your edits!)
+if [ ! -f "$SCRIPT_NAME" ]; then
+    echo "=== Generating initial $SCRIPT_NAME ==="
+    cat << 'EOF' > "$SCRIPT_NAME"
 import sys
 import os
 import time
@@ -30,11 +48,12 @@ import subprocess
 import json
 import math
 import numpy as np
+import pandas as pd
+from scipy.sparse import csr_matrix
 import pygame
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-# Suppress ALSA / JACK warning spam and force capture of desktop playback monitor
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "1"
 os.environ['PA_ALSA_PLUGHW'] = "1"
 os.environ['PULSE_INPUT_DEVICE'] = "@DEFAULT_MONITOR@"
@@ -47,6 +66,8 @@ except ImportError:
     pass
 
 SETTINGS_FILE = "fly_settings.json"
+CONNECTOME_CSV = "connections_princeton.csv"
+
 def load_app_settings():
     defaults = {
         "start_fullscreen": False,
@@ -72,7 +93,6 @@ app_settings = load_app_settings()
 
 pygame.init()
 
-# --- Dynamic Resolution Detection ---
 info = pygame.display.Info()
 DEFAULT_W, DEFAULT_H = 1100, 650
 fullscreen = app_settings["start_fullscreen"]
@@ -92,7 +112,7 @@ def get_video_flags(fs, bl):
     return flags
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT), get_video_flags(fullscreen, borderless))
-pygame.display.set_caption("Fruit Fly Brain File System Forager")
+pygame.display.set_caption("Fruit Fly Connectome File System Forager | Status: Initializing...")
 clock = pygame.time.Clock()
 
 BG_COLOR = (15, 15, 20)
@@ -169,17 +189,14 @@ def update_audio_devices():
         return
     p = pyaudio.PyAudio()
     try:
-        print("\n--- Available Audio Input Devices ---")
         for i in range(p.get_device_count()):
             dev = p.get_device_info_by_index(i)
             max_in = dev.get('maxInputChannels', 0)
             name = dev.get('name', '')
             if max_in > 0:
                 audio_devices.append((i, name))
-                print(f"  Index [{i}]: {name} (Inputs: {max_in})")
-        print("-------------------------------------\n")
-    except Exception as e:
-        print(f"[!] Device enum error: {e}")
+    except Exception:
+        pass
     finally:
         p.terminate()
 
@@ -209,36 +226,17 @@ def audio_listener():
             try:
                 target_dev = curr_idx
                 if target_dev is None:
-                    pulse_idx = None
-                    default_idx = None
-                    first_in = None
-
+                    pulse_idx, default_idx, first_in = None, None, None
                     for idx, name in audio_devices:
                         n_lower = name.lower()
-                        if first_in is None:
-                            first_in = idx
-                        if 'pulse' in n_lower:
-                            pulse_idx = idx
-                        elif 'default' in n_lower and default_idx is None:
-                            default_idx = idx
+                        if first_in is None: first_in = idx
+                        if 'pulse' in n_lower: pulse_idx = idx
+                        elif 'default' in n_lower and default_idx is None: default_idx = idx
 
-                    if pulse_idx is not None:
-                        target_dev = pulse_idx
-                    elif default_idx is not None:
-                        target_dev = default_idx
-                    else:
-                        target_dev = first_in
+                    target_dev = pulse_idx if pulse_idx is not None else (default_idx if default_idx is not None else first_in)
 
-                stream = p.open(
-                    format=pyaudio.paInt16,
-                    channels=1,
-                    rate=44100,
-                    input=True,
-                    input_device_index=target_dev,
-                    frames_per_buffer=512
-                )
-            except Exception as e:
-                stream = None
+                stream = p.open(format=pyaudio.paInt16, channels=1, rate=44100, input=True, input_device_index=target_dev, frames_per_buffer=512)
+            except Exception:
                 time.sleep(1.0)
                 continue
 
@@ -264,9 +262,95 @@ def audio_listener():
 
 threading.Thread(target=audio_listener, daemon=True).start()
 
-NUM_NODES = 16
-weights = np.random.randn(NUM_NODES, NUM_NODES) * 0.5
-brain_state = np.zeros(NUM_NODES)
+# --- Asynchronous Background Connectome Loader (Using Sparse Matrices) ---
+loading_status = "Initializing background loader..."
+is_loaded = False
+loaded_nodes = 32
+loaded_weights = None
+loaded_is_real = False
+
+def background_load_csv():
+    global loading_status, is_loaded, loaded_nodes, loaded_weights, loaded_is_real
+
+    fallback_synapses = [
+        (0, 4, 0.85), (0, 2, 0.45), (1, 5, 0.90), (1, 3, 0.50),
+        (2, 0, -0.60), (2, 1, -0.40), (3, 1, -0.65), (3, 0, -0.35),
+        (4, 8, 0.75), (5, 8, 0.80), (6, 9, 0.70), (7, 9, 0.85),
+        (8, 24, -0.55), (9, 25, -0.50), (24, 4, 0.40), (25, 5, 0.40)
+    ]
+
+    if os.path.exists(CONNECTOME_CSV):
+        try:
+            loading_status = "Reading 200MB CSV into RAM..."
+            print(f"[*] Found {CONNECTOME_CSV}. Parsing dataset via vectorized pandas...")
+
+            use_cols = ['pre_root_id', 'post_root_id']
+            sample_df = pd.read_csv(CONNECTOME_CSV, nrows=5)
+            if 'syn_count' in sample_df.columns:
+                use_cols.append('syn_count')
+
+            df = pd.read_csv(CONNECTOME_CSV, usecols=use_cols)
+
+            if 'pre_root_id' not in df.columns or 'post_root_id' not in df.columns:
+                raise ValueError("Missing required columns pre_root_id / post_root_id in CSV.")
+
+            loading_status = "Mapping neuron node IDs..."
+            all_ids = pd.concat([df['pre_root_id'], df['post_root_id']]).unique()
+            node_map = pd.Series(range(len(all_ids)), index=all_ids)
+
+            df['u'] = df['pre_root_id'].map(node_map)
+            df['v'] = df['post_root_id'].map(node_map)
+
+            if 'syn_count' in df.columns:
+                df['w'] = df['syn_count'].clip(upper=10.0) / 10.0
+            else:
+                df['w'] = 0.1
+
+            loaded_nodes = len(all_ids)
+            loading_status = "Building sparse adjacency matrix..."
+
+            u_arr = df['u'].to_numpy()
+            v_arr = df['v'].to_numpy()
+            w_arr = df['w'].to_numpy()
+
+            # Construct sparse matrix directly without allocating 205GB RAM
+            loaded_weights = csr_matrix((w_arr, (u_arr, v_arr)), shape=(loaded_nodes, loaded_nodes))
+            loaded_is_real = True
+            loading_status = "Done!"
+            print(f"[+] REAL BRAIN LOADED (SPARSE) successfully: {loaded_nodes} nodes, {len(w_arr)} connections.")
+        except Exception as e:
+            print(f"[!] CRITICAL ERROR parsing {CONNECTOME_CSV}: {e}")
+            print("[!] Failing over to mock model due to parsing error.")
+            loading_status = f"Error: {e}"
+            loaded_nodes = 32
+
+            u_f = [s[0] for s in fallback_synapses]
+            v_f = [s[1] for s in fallback_synapses]
+            w_f = [s[2] for s in fallback_synapses]
+            loaded_weights = csr_matrix((w_f, (u_f, v_f)), shape=(loaded_nodes, loaded_nodes))
+            loaded_is_real = False
+    else:
+        print(f"[!] {CONNECTOME_CSV} not found. Loading mock model.")
+        loading_status = "CSV not found. Using mock model."
+        loaded_nodes = 32
+        u_f = [s[0] for s in fallback_synapses]
+        v_f = [s[1] for s in fallback_synapses]
+        w_f = [s[2] for s in fallback_synapses]
+        loaded_weights = csr_matrix((w_f, (u_f, v_f)), shape=(loaded_nodes, loaded_nodes))
+        loaded_is_real = False
+
+    is_loaded = True
+
+# Start background loading immediately
+threading.Thread(target=background_load_csv, daemon=True).start()
+
+# Initial placeholders before background load completes
+CONNECTOME_NODES = 32
+weights = csr_matrix((CONNECTOME_NODES, CONNECTOME_NODES))
+membrane_potentials = np.zeros(CONNECTOME_NODES)
+brain_state = np.zeros(CONNECTOME_NODES)
+brain_status_title = "loading 200mb connectome..."
+is_real_brain = False
 
 settings_dropdown_open = False
 gear_menu_open = False
@@ -282,7 +366,7 @@ last_click_time = 0
 last_clicked_path = None
 
 blips = []
-recent_events = ["System initialized. Ready for events."]
+recent_events = ["System initialized. Loading background connectome..."]
 file_activity_pulse = 0.0
 last_file_touched = "Monitoring directories..."
 last_action_type = "IDLE"
@@ -309,16 +393,11 @@ def open_system_file(file_path):
 
 class FileChangeHandler(FileSystemEventHandler):
     def on_created(self, event):
-        if not event.is_directory:
-            self.trigger_event("CREATED", event.src_path)
-
+        if not event.is_directory: self.trigger_event("CREATED", event.src_path)
     def on_modified(self, event):
-        if not event.is_directory:
-            self.trigger_event("MODIFIED", event.src_path)
-
+        if not event.is_directory: self.trigger_event("MODIFIED", event.src_path)
     def on_deleted(self, event):
-        if not event.is_directory:
-            self.trigger_event("DELETED", event.src_path)
+        if not event.is_directory: self.trigger_event("DELETED", event.src_path)
 
     def trigger_event(self, action, path):
         global file_activity_pulse, last_file_touched, recent_events, last_action_type, active_dir_index
@@ -398,10 +477,20 @@ def handle_file_drop(src_path, dest_config):
                 recent_events.insert(0, f"MOVED: {filename} -> {dest_folder_name}")
         except Exception as e:
             recent_events.insert(0, f"DROP FAIL: {e}")
-        if len(recent_events) > 10:
-            recent_events.pop()
+        if len(recent_events) > 10: recent_events.pop()
 
 while running:
+    # Check if background thread finished loading the CSV into RAM
+    if is_loaded and not is_real_brain:
+        CONNECTOME_NODES = loaded_nodes
+        weights = loaded_weights
+        is_real_brain = loaded_is_real
+        membrane_potentials = np.zeros(CONNECTOME_NODES)
+        brain_state = np.zeros(CONNECTOME_NODES)
+        brain_status_title = "real brain loaded (sparse)" if is_real_brain else "mock brain loaded"
+        pygame.display.set_caption(f"Fruit Fly Connectome File System Forager | Status: {brain_status_title}")
+        recent_events.insert(0, f"Status update: {brain_status_title} ({CONNECTOME_NODES} nodes)")
+
     curr_w, curr_h = screen.get_size()
     radar_w = max(300, curr_w - 450)
     sidebar_x = radar_w
@@ -466,8 +555,7 @@ while running:
             elif event.button == 1:
                 if gear_rect.collidepoint(pos):
                     gear_menu_open = not gear_menu_open
-                    if gear_menu_open:
-                        update_audio_devices()
+                    if gear_menu_open: update_audio_devices()
 
                 elif gear_menu_open:
                     gm_x = curr_w - 340
@@ -564,8 +652,7 @@ while running:
                                 active_slider = s
 
         elif event.type == pygame.MOUSEBUTTONUP:
-            if active_slider:
-                save_config(watch_configs)
+            if active_slider: save_config(watch_configs)
             active_slider = None
 
         elif event.type == pygame.MOUSEMOTION and active_slider and active_cfg and settings_dropdown_open:
@@ -633,8 +720,17 @@ while running:
         fly_angle += (target_angle - fly_angle) * (0.08 if fly_mellow else 0.15)
 
     external_input = local_pulse * 5.0 + random.uniform(0, noise) + (curr_audio_lvl * 2.0)
-    brain_state = np.tanh(np.dot(weights, brain_state) + external_input * sensitivity)
-    brain_state *= (1.0 - decay)
+    input_vector = np.zeros(CONNECTOME_NODES)
+    if CONNECTOME_NODES > 0:
+        input_vector[0] = external_input * sensitivity
+    if CONNECTOME_NODES > 1:
+        input_vector[1] = external_input * sensitivity * 0.8
+
+    # Sparse matrix dot product for neural simulation step (efficient!)
+    synapses_current = weights.dot(brain_state)
+    membrane_potentials += (-0.2 * membrane_potentials + synapses_current + input_vector)
+    brain_state = np.tanh(membrane_potentials)
+    membrane_potentials *= (1.0 - decay)
     activity_level = np.mean(np.abs(brain_state))
 
     if local_pulse > 0.5:
@@ -745,8 +841,20 @@ while running:
     pygame.draw.rect(screen, PANEL_BG, panel_rect)
     pygame.draw.line(screen, BORDER_COLOR, (sidebar_x, 0), (sidebar_x, curr_h), 2)
 
-    header = bold_font.render("Fly-Manager [F11: Fullscreen]", True, FILE_COLOR)
+    header = bold_font.render(f"Fly-Manager [Nodes: {CONNECTOME_NODES}]", True, FILE_COLOR)
     screen.blit(header, (sidebar_x + 20, 15))
+
+    # Show loading status overlay on screen if background CSV parse is still running
+    if not is_loaded:
+        load_box_w, load_box_h = 360, 60
+        load_box_rect = pygame.Rect(radar_w // 2 - load_box_w // 2, curr_h // 2 - load_box_h // 2, load_box_w, load_box_h)
+        pygame.draw.rect(screen, (25, 25, 35), load_box_rect, border_radius=6)
+        pygame.draw.rect(screen, ALERT_COLOR, load_box_rect, 2, border_radius=6)
+
+        load_title_surf = bold_font.render("CONNECTOME LOADING...", True, ALERT_COLOR)
+        load_status_surf = font.render(loading_status[:46], True, TEXT_COLOR)
+        screen.blit(load_title_surf, (load_box_rect.x + 15, load_box_rect.y + 12))
+        screen.blit(load_status_surf, (load_box_rect.x + 15, load_box_rect.y + 35))
 
     if active_cfg:
         full_dir_path = active_cfg["path"]
@@ -787,7 +895,7 @@ while running:
     pygame.draw.rect(screen, (12, 12, 16), log_panel_rect, border_radius=4)
     pygame.draw.rect(screen, BORDER_COLOR, log_panel_rect, 1, border_radius=4)
 
-    log_title = bold_font.render("Activity Log Stream:", True, FILE_COLOR)
+    log_title = bold_font.render(f"Status: [{brain_status_title.upper()}]", True, RADAR_GREEN if is_real_brain else ALERT_COLOR)
     screen.blit(log_title, (sidebar_x + 20, 255))
 
     max_lines = max(2, (log_panel_h - 10) // 16)
@@ -895,5 +1003,8 @@ while running:
 
 observer.stop()
 EOF
+fi
 
+# 5. Launch the application using the virtual environment python
+echo "=== Launching Fly File Radar (Sparse Matrix Mode) ==="
 python "$SCRIPT_NAME"
