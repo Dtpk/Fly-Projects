@@ -5,6 +5,7 @@ VENV_DIR="fly_env"
 SCRIPT_NAME="fly_file_radar.py"
 CONFIG_PATH="watch_dirs.txt"
 CSV_PATH="connections_princeton.csv"
+ATTRIBUTES_PATH="neurons.csv"
 
 # 1. Check virtual environment & dependencies (added scipy for sparse matrices)
 if [ ! -d "$VENV_DIR" ]; then
@@ -29,9 +30,13 @@ if [ ! -f "$CONFIG_PATH" ]; then
 EOF
 fi
 
-# 3. Check for CSV file
+# 3. Check for CSV files
 if [ ! -f "$CSV_PATH" ]; then
     echo "[!] Warning: $CSV_PATH not found in the current folder. The script will fall back to mock data."
+fi
+
+if [ ! -f "$ATTRIBUTES_PATH" ]; then
+    echo "[!] Notice: $ATTRIBUTES_PATH not found. Neuron attribute metadata mapping will be skipped."
 fi
 
 # 4. Only generate the Python script if it doesn't exist yet (protects your edits!)
@@ -67,6 +72,7 @@ except ImportError:
 
 SETTINGS_FILE = "fly_settings.json"
 CONNECTOME_CSV = "connections_princeton.csv"
+ATTRIBUTES_CSV = "neurons.csv"
 
 def load_app_settings():
     defaults = {
@@ -182,6 +188,9 @@ running = True
 audio_devices = []
 selected_audio_idx = app_settings["audio_device_index"]
 
+# View cycle state: 0 = Normal / Log Section, 1 = Full-Screen Log / Panel Mode
+view_mode_state = 0
+
 def update_audio_devices():
     global audio_devices
     audio_devices = []
@@ -262,15 +271,16 @@ def audio_listener():
 
 threading.Thread(target=audio_listener, daemon=True).start()
 
-# --- Asynchronous Background Connectome Loader (Using Sparse Matrices) ---
+# --- Asynchronous Background Connectome & Attributes Loader ---
 loading_status = "Initializing background loader..."
 is_loaded = False
 loaded_nodes = 32
 loaded_weights = None
+loaded_attributes = None
 loaded_is_real = False
 
 def background_load_csv():
-    global loading_status, is_loaded, loaded_nodes, loaded_weights, loaded_is_real
+    global loading_status, is_loaded, loaded_nodes, loaded_weights, loaded_attributes, loaded_is_real
 
     fallback_synapses = [
         (0, 4, 0.85), (0, 2, 0.45), (1, 5, 0.90), (1, 3, 0.50),
@@ -281,7 +291,7 @@ def background_load_csv():
 
     if os.path.exists(CONNECTOME_CSV):
         try:
-            loading_status = "Reading 200MB CSV into RAM..."
+            loading_status = "Reading connectome CSV into RAM..."
             print(f"[*] Found {CONNECTOME_CSV}. Parsing dataset via vectorized pandas...")
 
             use_cols = ['pre_root_id', 'post_root_id']
@@ -293,6 +303,13 @@ def background_load_csv():
 
             if 'pre_root_id' not in df.columns or 'post_root_id' not in df.columns:
                 raise ValueError("Missing required columns pre_root_id / post_root_id in CSV.")
+
+            # Load neuron attributes metadata if available
+            if os.path.exists(ATTRIBUTES_CSV):
+                loading_status = "Loading neuron attributes metadata..."
+                print(f"[*] Found {ATTRIBUTES_CSV}. Parsing attributes dictionary...")
+                loaded_attributes = pd.read_csv(ATTRIBUTES_CSV)
+                print(f"[+] Loaded neuron attributes metadata successfully.")
 
             loading_status = "Mapping neuron node IDs..."
             all_ids = pd.concat([df['pre_root_id'], df['post_root_id']]).unique()
@@ -313,7 +330,6 @@ def background_load_csv():
             v_arr = df['v'].to_numpy()
             w_arr = df['w'].to_numpy()
 
-            # Construct sparse matrix directly without allocating 205GB RAM
             loaded_weights = csr_matrix((w_arr, (u_arr, v_arr)), shape=(loaded_nodes, loaded_nodes))
             loaded_is_real = True
             loading_status = "Done!"
@@ -347,6 +363,7 @@ threading.Thread(target=background_load_csv, daemon=True).start()
 # Initial placeholders before background load completes
 CONNECTOME_NODES = 32
 weights = csr_matrix((CONNECTOME_NODES, CONNECTOME_NODES))
+neuron_attributes = None
 membrane_potentials = np.zeros(CONNECTOME_NODES)
 brain_state = np.zeros(CONNECTOME_NODES)
 brain_status_title = "loading 200mb connectome..."
@@ -480,14 +497,25 @@ def handle_file_drop(src_path, dest_config):
         if len(recent_events) > 10: recent_events.pop()
 
 while running:
-    # Check if background thread finished loading the CSV into RAM
-    if is_loaded and not is_real_brain:
+    # Check if background thread finished loading CSV & attributes into RAM
+    if is_loaded and not is_real_brain and loaded_is_real:
         CONNECTOME_NODES = loaded_nodes
         weights = loaded_weights
+        neuron_attributes = loaded_attributes
         is_real_brain = loaded_is_real
         membrane_potentials = np.zeros(CONNECTOME_NODES)
         brain_state = np.zeros(CONNECTOME_NODES)
-        brain_status_title = "real brain loaded (sparse)" if is_real_brain else "mock brain loaded"
+        brain_status_title = "real brain loaded (sparse)"
+        pygame.display.set_caption(f"Fruit Fly Connectome File System Forager | Status: {brain_status_title}")
+        recent_events.insert(0, f"Status update: {brain_status_title} ({CONNECTOME_NODES} nodes)")
+    elif is_loaded and not is_real_brain and not loaded_is_real:
+        CONNECTOME_NODES = loaded_nodes
+        weights = loaded_weights
+        neuron_attributes = loaded_attributes
+        is_real_brain = loaded_is_real
+        membrane_potentials = np.zeros(CONNECTOME_NODES)
+        brain_state = np.zeros(CONNECTOME_NODES)
+        brain_status_title = "mock brain loaded"
         pygame.display.set_caption(f"Fruit Fly Connectome File System Forager | Status: {brain_status_title}")
         recent_events.insert(0, f"Status update: {brain_status_title} ({CONNECTOME_NODES} nodes)")
 
@@ -514,6 +542,9 @@ while running:
 
     gear_rect = pygame.Rect(curr_w - 38, 10, 28, 28)
 
+    # Hotkey / View toggle button rectangle placed to the very right of the status indicator header
+    view_toggle_btn_rect = pygame.Rect(sidebar_x + 295, 252, 135, 20)
+
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
@@ -526,6 +557,9 @@ while running:
                 else:
                     target_w, target_h = DEFAULT_W, DEFAULT_H
                 screen = pygame.display.set_mode((target_w, target_h), get_video_flags(fullscreen, borderless))
+            elif event.key == pygame.K_F12:
+                # Cycle view mode via hotkey F12
+                view_mode_state = 1 if view_mode_state == 0 else 0
 
         elif event.type == pygame.DROPFILE:
             dropped_path = event.file
@@ -553,7 +587,11 @@ while running:
                         break
 
             elif event.button == 1:
-                if gear_rect.collidepoint(pos):
+                if view_toggle_btn_rect.collidepoint(pos):
+                    # Cycle view mode on button click
+                    view_mode_state = 1 if view_mode_state == 0 else 0
+
+                elif gear_rect.collidepoint(pos):
                     gear_menu_open = not gear_menu_open
                     if gear_menu_open: update_audio_devices()
 
@@ -600,7 +638,7 @@ while running:
                         save_config(watch_configs)
                     context_menu["open"] = False
                 else:
-                    if active_cfg and pos[0] >= (sidebar_x + 20):
+                    if active_cfg and pos[0] >= (sidebar_x + 20) and view_mode_state == 0:
                         full_dir_path = active_cfg["path"]
                         path_str = full_dir_path if full_dir_path.endswith("/") else full_dir_path + "/"
                         chunk_size = 45
@@ -844,7 +882,7 @@ while running:
     header = bold_font.render(f"Fly-Manager [Nodes: {CONNECTOME_NODES}]", True, FILE_COLOR)
     screen.blit(header, (sidebar_x + 20, 15))
 
-    # Show loading status overlay on screen if background CSV parse is still running
+    # Show loading status overlay on screen if background parse is still running
     if not is_loaded:
         load_box_w, load_box_h = 360, 60
         load_box_rect = pygame.Rect(radar_w // 2 - load_box_w // 2, curr_h // 2 - load_box_h // 2, load_box_w, load_box_h)
@@ -856,7 +894,7 @@ while running:
         screen.blit(load_title_surf, (load_box_rect.x + 15, load_box_rect.y + 12))
         screen.blit(load_status_surf, (load_box_rect.x + 15, load_box_rect.y + 35))
 
-    if active_cfg:
+    if active_cfg and view_mode_state == 0:
         full_dir_path = active_cfg["path"]
         path_str = full_dir_path if full_dir_path.endswith("/") else full_dir_path + "/"
         chunk_size = 45
@@ -891,14 +929,26 @@ while running:
                     screen.blit(file_lbl, (sidebar_x + 35, ey))
             except PermissionError:
                 pass
+    elif view_mode_state == 1:
+        # Full-Screen Log Mode display inside file-browser top panel area
+        fs_notice = bold_font.render("=== FULL-SCREEN LOG MODE ===", True, WAVE_COLOR)
+        screen.blit(fs_notice, (sidebar_x + 20, 45))
+        fs_sub = font.render("Showing expanded history log window.", True, TEXT_COLOR)
+        screen.blit(fs_sub, (sidebar_x + 20, 65))
 
     pygame.draw.rect(screen, (12, 12, 16), log_panel_rect, border_radius=4)
     pygame.draw.rect(screen, BORDER_COLOR, log_panel_rect, 1, border_radius=4)
 
-    log_title = bold_font.render(f"Status: [{brain_status_title.upper()}]", True, RADAR_GREEN if is_real_brain else ALERT_COLOR)
+    log_title = bold_font.render(f"Status: [{brain_status_title.upper()}]", True, RADAR_GREEN if curr_audio_lvl > 0.005 or local_pulse > 0 or is_real_brain else ALERT_COLOR)
     screen.blit(log_title, (sidebar_x + 20, 255))
 
-    max_lines = max(2, (log_panel_h - 10) // 16)
+    # --- View Toggle Button (Far Right of Status Header) ---
+    pygame.draw.rect(screen, (30, 45, 60) if view_mode_state == 1 else (25, 28, 38), view_toggle_btn_rect, border_radius=4)
+    pygame.draw.rect(screen, WAVE_COLOR if view_mode_state == 1 else BORDER_COLOR, view_toggle_btn_rect, 1, border_radius=4)
+    toggle_btn_label = font.render(f"View: {'FULL-LOG' if view_mode_state == 1 else 'STANDARD'}", True, WAVE_COLOR if view_mode_state == 1 else TEXT_COLOR)
+    screen.blit(toggle_btn_label, (view_toggle_btn_rect.x + 8, view_toggle_btn_rect.y + 3))
+
+    max_lines = max(2, (log_panel_h - 10) // 16) if view_mode_state == 0 else max(2, (log_panel_h + 180) // 16)
     with event_lock:
         display_logs = recent_events[:max_lines]
 
