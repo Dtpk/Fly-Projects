@@ -24,18 +24,21 @@ use cases for the fruit fly connectome others didn't try yet or think of.
     -- Fly-Dar --
 
 (video place holder)
+
 Background rssi values used for person based tracker. I tried this in the past scripting it my self but with the fruit fly connectome added this makes it way more stable and easy to configure cause the fruit fly can judge what is a standard "normal" and react on its own. 
 The one slider adjust its "normal" state I like 10 seconds but you could tweak lower or higher it really depends on the networking tool used and if your hardware can refresh the rssi values fast enough using nmcli. Oh yeah you will need to install nmcli or iw but I might include both version but right now it is for nmcli its output is just cleaner. That and python are the only packages you need for the "fly-Dar" to work.
 
     -- Fly-Manager --
 
 (video place holder)
-This I wanted to make look like dolphin but with a lot more buzz admittedly pygame isn't the best to act as a file manager but you can drag and drop and have a auto toggle set you configure the txt file made next to the script with the dirs you want then run the script. After that if you hit the toggle if the fly sees 2 files going at once everything in the dir is removed for the 2 files that just went in useful for only keeping the first few logs and only when 2 happen at the same time it removes them all. This could use more work or settings so any ideas are welcomed. The fly will alert you when a file is made or deleted and you can drag and drop files to add them to your folders directly with the "Fly-Manager" This one had some slight changes compared to the video but still behaves the same way all that is included is file managing copy or move settings fullscreen or not full screen title bar or no title bar and a music detector so the fly can mellow out with music.
+
+This I wanted to make look like dolphin but with a lot more buzz admittedly pygame isn't the best to act as a file manager but you can drag and drop and have a auto toggle set you configure the txt file made next to the script with the dirs you want then run the script. After that if you hit the toggle if the fly sees 2 files going at once everything in the dir is removed for the 2 files that just went in. This is useful for only keeping the first few logs and only when 2 happen at the same time it removes them all. This could use more work or settings so any ideas are welcomed. The fly will alert you when a file is made or deleted and you can drag and drop files to add them to your folders directly with the "Fly-Manager" This one had some slight changes compared to the video but still behaves the same way all that is included is file managing copy or move settings fullscreen or not full screen title bar or no title bar and a music detector so the fly can mellow out with music.
 
     -- By-The-Flys-Gaming --
 
 (video place holder)
-This project will require some use end work just do as it says when you run the script you will manually activate the venv I will change this then but when activated launch the app.py and then goto the local ip this can be configured for over the internet use but I have not tested it. NOTICE wayland users this requires X11 if you are more knowledgeable and can get reliable results on wayland let me know but we need x11 for the screen capture or this will refuse to work. 
+
+This project will require some user end work just do as it says when you run the script you will manually activate the venv I will change this then but when activated launch the app.py and then goto the local ip this can be configured for over the internet use but I have not tested it. NOTICE wayland users this requires X11 if you are more knowledgeable and can get reliable results on wayland let me know but we need x11 for the screen capture or this will refuse to work. 
 Also make sure the radar aligns with the radar in the game you use and this mimics a gamepad so any game with a gamepad you can plug in while running this will work on. You will need to adjust the sliders so the fly gets the best chance at playing the game. "WILL BE TWEAKING THIS PROJECT MORE SO EXPECT A FEW CHANGES IN TIME"
 This one uses flask for a web interface something I am more use to then pygame so if it seems more polished you know why.
 
