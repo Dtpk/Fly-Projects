@@ -38,9 +38,12 @@ This I wanted to make look like dolphin but with a lot more buzz admittedly pyga
 
 (video place holder)
 
-This project will require some user end work just do as it says when you run the script you will manually activate the venv I will change this then but when activated launch the app.py and then goto the local ip this can be configured for over the internet use but I have not tested it. NOTICE wayland users this requires X11 if you are more knowledgeable and can get reliable results on wayland let me know but we need x11 for the screen capture or this will refuse to work. 
-Also make sure the radar aligns with the radar in the game you use and this mimics a gamepad so any game with a gamepad you can plug in while running this will work on. You will need to adjust the sliders so the fly gets the best chance at playing the game. "WILL BE TWEAKING THIS PROJECT MORE SO EXPECT A FEW CHANGES IN TIME"
-This one uses flask for a web interface something I am more use to then pygame so if it seems more polished you know why.
+This is for x11 not wayland!! Also fixed so no set up besides making sure the "connections_princeton.csv" and "neurons.csv" are placed next to the app.py in the venv if not the system falls back to a fake "mock" brain.
+
+Also make sure the radar aligns with the radar in the game this also mimics a gamepad so any game with a gamepad you can plug in while running this will work on. You will need to adjust the sliders so the fly gets the best chance at playing the game. "WILL BE TWEAKING THIS PROJECT MORE SO EXPECT A FEW CHANGES IN TIME"
+This one uses flask for a web interface something I am more use to then pygame so if it seems more polished you know why it will also display if it using the "mock" brain or using your "real" connectome.
+
+Eventually adding a virtual gamepad to the page so you can navigate manually some games might need that I think.
 
 Watch the video to learn more and see them in action!!! "https://www.youtube.com/watch?v=3aTu1EkrrDY"
 
