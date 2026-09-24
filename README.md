@@ -49,6 +49,6 @@ Watch the video to learn more and see them in action!!! "https://www.youtube.com
 
     -- Special notes --
 
-A heads up I am working on a selector or load as needed method right now it grabs a random 64 nodes for the file manage and the fly-dar the fly-dar will get a fly-dar-learning version which will have a selector letting you use more select specific sections "etc" and it will learn and adjust the weights not just be static not sure if this will improve it more but it a start. "central" "motor" "sensory" so on and so forth from 100 to 64 will be select-able perhaps more as I work on it.
+A heads up I am working on a selector or load as needed method right now it grabs a random 64 nodes for the file manage and the fly-dar the fly-dar will get a fly-dar-learning version which will have a selector letting you use more specific sections "etc" and it will learn and adjust the weights not just be static not sure if this will improve it more but it a start. "central" "motor" "sensory" so on and so forth from 100 to 64 will be select-able perhaps more as I work on it.
 
 If your wondering why not load the full connectome thing? It would consume more then 102gb of ram or more which is why lots of other projects just use a section like I been doing or they do a sparce trick where it loads as needed which I am looking into as well. Again more eyes and help will improve the project.
