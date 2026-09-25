@@ -32,6 +32,8 @@ UPDATE fly-dar-learning version
 
 This one does as it says it can learn some what adjusting the weights then it will fall back after awhile, and it has more node selection choices you can even load the whole thing in a sparce form this is very very un-optimized it lags I will work on it if we can't get a visual it might be dropped for just smooth fps that why the full connectome is its own option. This one isnt as static nor does it use a random selection of neurons unless you tell it.
 
+It might need tweaking for cpu use or nvidia I will try some stuff then so if you run into issues know system compatibly is a bit unstable compared to the static non learning one.
+
     -- Fly-Manager --
 
 (video place holder)
