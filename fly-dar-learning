@@ -1,0 +1,741 @@
+#!/usr/bin/env bash
+set -e
+
+VENV_DIR="fly_env"
+SCRIPT_NAME="fly_radar.py"
+CONVERTED_MODEL="brain_tensor_cache.pt"
+PRINCETON_CONN="connections_princeton.csv"
+PRINCETON_NEUR="neurons.csv"
+
+echo "=== Fruit Fly Brain WiFi Monitor & Optimized Connectome Hub ==="
+
+# Step 1: Virtual Environment Setup with PyTorch & Dependencies
+if [ ! -d "$VENV_DIR" ]; then
+    echo "[!] Setting up virtual environment..."
+    python3 -m venv "$VENV_DIR"
+    source "$VENV_DIR/bin/activate"
+    echo "[*] Installing dependencies (NumPy, Pandas, SciPy, Pygame, PyTorch)..."
+    pip install --no-cache-dir --upgrade pip
+    pip install --no-cache-dir numpy pandas scipy pygame
+    pip install --no-cache-dir torch torchvision --extra-index-url https://download.pytorch.org/whl/cpu
+    deactivate
+    echo "[+] Setup complete!"
+else
+    echo "[*] Existing environment found."
+fi
+
+# Step 2: One-time CSV to PyTorch Sparse Tensor Conversion for Full Connectome
+if [ ! -f "$CONVERTED_MODEL" ]; then
+    if [ -f "$PRINCETON_CONN" ]; then
+        echo "[*] Raw connectome CSV detected. Running sparse tensor conversion..."
+        source "$VENV_DIR/bin/activate"
+        python3 - << 'EOF_CONVERT'
+import pandas as pd
+import torch
+import numpy as np
+
+print(' -> Reading connectome CSV safely...')
+df = pd.read_csv('connections_princeton.csv', low_memory=False)
+
+src_col = 'pre_root_id' if 'pre_root_id' in df.columns else df.columns[0]
+dst_col = 'post_root_id' if 'post_root_id' in df.columns else df.columns[1]
+weight_col = 'synapse_count' if 'synapse_count' in df.columns else (df.columns[2] if len(df.columns) > 2 else None)
+
+unique_nodes = pd.unique(df[[src_col, dst_col]].values.ravel())
+id_to_idx = {nid: i for i, nid in enumerate(unique_nodes)}
+n_nodes = len(unique_nodes)
+
+srcs = df[src_col].map(id_to_idx).to_numpy()
+dsts = df[dst_col].map(id_to_idx).to_numpy()
+if weight_col:
+    weights = pd.to_numeric(df[weight_col], errors='coerce').fillna(1.0).to_numpy(dtype=np.float32)
+else:
+    weights = np.ones(len(df), dtype=np.float32)
+
+print(f' -> Building safe sparse PyTorch representation for {n_nodes:,} nodes...')
+torch.save({
+    'indices': torch.tensor(np.vstack((srcs, dsts)), dtype=torch.long),
+    'values': torch.tensor(weights, dtype=torch.float32),
+    'shape': torch.Size([n_nodes, n_nodes]),
+    'node_mapping': id_to_idx
+}, 'brain_tensor_cache.pt')
+print('[+] Sparse tensor cache successfully created!')
+EOF_CONVERT
+        deactivate
+    else
+        echo "[!] Warning: No CSV found ($PRINCETON_CONN) and no tensor cache ($CONVERTED_MODEL). App will fall back to SciPy/Mock modes."
+    fi
+else
+    echo "[*] Precompiled sparse brain tensor cache found."
+fi
+
+# Step 3: Write the Integrated Application Script
+echo "[*] Writing integrated application script $SCRIPT_NAME..."
+cat << 'EOF' > "$SCRIPT_NAME"
+import sys
+import os
+import subprocess
+import random
+import threading
+import time
+import json
+import math
+import numpy as np
+import scipy.sparse as sp
+import pygame
+
+# Try loading PyTorch for the full connectome sparse tensor engine
+TORCH_AVAILABLE = False
+torch_matrix = None
+torch_mapping = None
+try:
+    import torch
+    if os.path.exists("brain_tensor_cache.pt"):
+        checkpoint = torch.load("brain_tensor_cache.pt", weights_only=False)
+        torch_matrix = torch.sparse_coo_tensor(
+            checkpoint['indices'],
+            checkpoint['values'],
+            checkpoint['shape']
+        ).coalesce()
+        torch_mapping = checkpoint['node_mapping']
+        TORCH_AVAILABLE = True
+        print("[+] PyTorch sparse tensor loaded successfully for full connectome mode.")
+except Exception as e:
+    print(f"[!] PyTorch sparse cache load note: {e}")
+
+pygame.init()
+pygame.font.init()
+
+try:
+    font = pygame.font.Font("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
+    font_sm = pygame.font.Font("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 8)
+except Exception:
+    font = pygame.font.Font(None, 14)
+    font_sm = pygame.font.Font(None, 8)
+
+SETTINGS_FILE = "radar_settings.json"
+PRINCETON_CONN = "connections_princeton.csv"
+PRINCETON_CONN_GZ = "connections_princeton.csv.gz"
+PRINCETON_NEUR = "neurons.csv"
+PRINCETON_NEUR_GZ = "neurons.csv.gz"
+
+def load_app_settings():
+    defaults = {"start_fullscreen": False, "borderless": False}
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r") as f:
+                defaults.update(json.load(f))
+        except Exception:
+            pass
+    return defaults
+
+def save_app_settings(app_settings):
+    try:
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(app_settings, f, indent=4)
+    except Exception:
+        pass
+
+app_settings = load_app_settings()
+
+info = pygame.display.Info()
+DEFAULT_W, DEFAULT_H = 950, 680
+fullscreen = app_settings["start_fullscreen"]
+borderless = app_settings["borderless"]
+
+WIDTH, HEIGHT = (info.current_w, info.current_h) if fullscreen else (DEFAULT_W, DEFAULT_H)
+
+def get_video_flags(fs, bl):
+    flags = pygame.RESIZABLE
+    if fs:
+        flags |= pygame.FULLSCREEN
+    if bl:
+        flags |= pygame.NOFRAME
+    return flags
+
+screen = pygame.display.set_mode((WIDTH, HEIGHT), get_video_flags(fullscreen, borderless))
+
+BG_COLOR = (10, 10, 15)
+RADAR_GREEN = (0, 255, 100)
+RADAR_DARK = (0, 40, 15)
+TEXT_COLOR = (200, 200, 200)
+ALERT_COLOR = (255, 40, 70)
+ROUTER_BLUE = (40, 140, 255)
+ROUTER_YELLOW = (255, 220, 30)
+
+H2_HEALTH_BLUE = (105, 175, 235)
+H2_SHIELD_BLUE = (45, 115, 195)
+H2_BORDER_BLUE = (48, 102, 158)
+H2_BASE_LIGHT = (212, 228, 242)
+H2_DARK_INNER = (45, 95, 148)
+H2_WEDGE_DARK = (112, 148, 182)
+H2_PULSE_BLUE = (150, 200, 255)
+
+model_loaded_from_csv = False
+weights = None
+neurons_df = None
+connections_df = None
+
+conn_path = PRINCETON_CONN if os.path.exists(PRINCETON_CONN) else (PRINCETON_CONN_GZ if os.path.exists(PRINCETON_CONN_GZ) else None)
+neur_path = PRINCETON_NEUR if os.path.exists(PRINCETON_NEUR) else (PRINCETON_NEUR_GZ if os.path.exists(PRINCETON_NEUR_GZ) else None)
+
+regional_filters = [
+    {"label": "Mix (100 Nodes)", "super_class": None, "target_size": 100},
+    {"label": "Mix (64 Nodes)", "super_class": None, "target_size": 64},
+    {"label": "All Central", "super_class": "central", "target_size": None},
+    {"label": "All Sensory", "super_class": "sensory", "target_size": None},
+    {"label": "All Motor", "super_class": "motor", "target_size": None},
+    {"label": "All Descending", "super_class": "descending", "target_size": None}
+]
+regional_mode_index = 0
+is_full_connectome = False
+
+class CircuitSceneManager:
+    def __init__(self):
+        self.rendered_pillars_cache = []
+    def reset_cache(self):
+        self.rendered_pillars_cache.clear()
+
+scene_manager = CircuitSceneManager()
+
+def apply_current_filter():
+    global weights, NUM_NODES, model_loaded_from_csv, brain_state, torch_matrix
+    try:
+        scene_manager.reset_cache()
+        if is_full_connectome and TORCH_AVAILABLE and torch_matrix is not None:
+            NUM_NODES = torch_matrix.shape[0]
+            weights = torch_matrix
+            brain_state = np.zeros(NUM_NODES, dtype=np.float32)
+            model_loaded_from_csv = True
+            print(f"[+] Active Circuit: Full Connectome via PyTorch Sparse Tensor ({NUM_NODES:,} nodes).")
+            return
+
+        cfg = regional_filters[regional_mode_index]
+        target_size = cfg["target_size"]
+        super_class_query = cfg["super_class"]
+
+        df = neurons_df.copy()
+        if super_class_query and 'Super Class' in df.columns:
+            filtered_neurons = df[df['Super Class'].str.contains(super_class_query, case=False, na=False)]
+            if len(filtered_neurons) > 0:
+                df = filtered_neurons
+
+        if target_size is not None:
+            sampled_neurons = df.sample(n=min(target_size, len(df)), random_state=42)
+        else:
+            sampled_neurons = df.sample(n=min(300, len(df)), random_state=42) if len(df) > 300 else df
+
+        id_col = 'Root ID' if 'Root ID' in sampled_neurons.columns else sampled_neurons.columns[0]
+        valid_ids = set(sampled_neurons[id_col])
+
+        src_col = 'pre_root_id' if 'pre_root_id' in connections_df.columns else connections_df.columns[0]
+        dst_col = 'post_root_id' if 'post_root_id' in connections_df.columns else connections_df.columns[1]
+
+        weight_col = None
+        for col in ['synapse_count', 'weight', 'count']:
+            if col in connections_df.columns:
+                weight_col = col
+                break
+
+        filtered_conn = connections_df[connections_df[src_col].isin(valid_ids) & connections_df[dst_col].isin(valid_ids)]
+
+        id_list = list(valid_ids)
+        id_to_idx = {nid: i for i, nid in enumerate(id_list)}
+        NUM_NODES = len(id_list)
+
+        src_arr = filtered_conn[src_col].map(id_to_idx).to_numpy()
+        dst_arr = filtered_conn[dst_col].map(id_to_idx).to_numpy()
+
+        if weight_col:
+            val_arr = pd.to_numeric(filtered_conn[weight_col], errors='coerce').fillna(1.0).to_numpy(dtype=np.float32)
+        else:
+            val_arr = np.ones(len(filtered_conn), dtype=np.float32)
+
+        valid_mask = ~np.isnan(src_arr) & ~np.isnan(dst_arr) & ~np.isnan(val_arr)
+        sparse_weights = sp.coo_matrix((val_arr[valid_mask], (src_arr[valid_mask], dst_arr[valid_mask])), shape=(NUM_NODES, NUM_NODES), dtype=np.float32).tocsr()
+
+        max_w = sparse_weights.max()
+        if max_w > 0:
+            sparse_weights = sparse_weights / max_w * 0.9
+
+        weights = sparse_weights
+        brain_state = np.zeros(NUM_NODES, dtype=np.float32)
+        model_loaded_from_csv = True
+        print(f"[+] Active Circuit: {cfg['label']} ({NUM_NODES} nodes).")
+    except Exception as e:
+        print(f"[!] Error building connectome subset: {e}")
+
+if conn_path and neur_path:
+    try:
+        import pandas as pd
+        print("[*] Loading Princeton Connectome CSVs safely...")
+        neurons_df = pd.read_csv(neur_path, low_memory=False)
+        connections_df = pd.read_csv(conn_path, low_memory=False)
+        apply_current_filter()
+    except Exception as e:
+        print(f"[!] Error parsing CSVs: {e}. Falling back to mock data.")
+
+if not model_loaded_from_csv:
+    NUM_NODES = 36
+    weights = sp.random(NUM_NODES, NUM_NODES, density=0.15, format='csr', dtype=np.float32) * 0.4
+
+brain_state = np.zeros(NUM_NODES, dtype=np.float32)
+
+modes_list = ["RADAR", "PS2_GRID", "HALO_RADAR"]
+mode_index = 0
+current_mode = modes_list[mode_index]
+
+motion_momentum = 0.0
+motion_cooldown = 0
+ps2_orbit_angle = 0.0
+target_pitch_offset = 0.0
+current_pitch_offset = 0.0
+pitch_timer = 0
+current_rssi = 0.5
+baseline_rssi = 0.5
+deviation_metric = 0.0
+stuck_counter = 0
+gear_menu_open = False
+classic_blips = []
+halo_target_rel_x, halo_target_rel_y = 0.0, 0.0
+halo_smooth_rel_x, halo_smooth_rel_y = 0.0, 0.0
+halo_blip_life = 0
+smoothed_motion_x = 0
+smoothed_motion_y = 0
+router_angle = -1.57
+pulse_rings = [0.0, 0.33, 0.66]
+
+wifi_lock = threading.Lock()
+running = True
+
+sliders = [
+    {"name": "Sensitivity", "min": 0.1, "max": 5.0, "val": 3.0, "rel_y": 0.22},
+    {"name": "Firing Decay", "min": 0.01, "max": 0.5, "val": 0.15, "rel_y": 0.35},
+    {"name": "Noise Floor", "min": 0.0, "max": 1.0, "val": 0.25, "rel_y": 0.48},
+    {"name": "Adapt Speed", "min": 10.0, "max": 300.0, "val": 60.0, "rel_y": 0.61},
+]
+active_slider = None
+radar_angle = 0.0
+
+def get_wifi_signal():
+    try:
+        output = subprocess.check_output(["nmcli", "-f", "IN-USE,SIGNAL", "dev", "wifi"], stderr=subprocess.STDOUT).decode("utf-8")
+        for line in output.splitlines():
+            if line.startswith("*"):
+                parts = line.split()
+                for part in parts:
+                    if part.isdigit():
+                        return max(0.0, min(1.0, int(part) / 100.0))
+    except Exception:
+        pass
+    return random.uniform(0.4, 0.6)
+
+def wifi_background_worker():
+    global current_rssi, baseline_rssi, deviation_metric, stuck_counter, running
+    recent_signals = []
+    while running:
+        new_val = get_wifi_signal()
+        recent_signals.append(new_val)
+        if len(recent_signals) > 5:
+            recent_signals.pop(0)
+        smoothed_val = sum(recent_signals) / len(recent_signals)
+        current_adapt_threshold = sliders[3]["val"]
+        with wifi_lock:
+            current_rssi = smoothed_val
+            deviation_metric = abs(current_rssi - baseline_rssi)
+            if deviation_metric > 0.025:
+                stuck_counter += 1
+                if stuck_counter > current_adapt_threshold:
+                    baseline_rssi = baseline_rssi * 0.95 + current_rssi * 0.05
+                    stuck_counter = 0
+            else:
+                stuck_counter = max(0, stuck_counter - 1)
+                baseline_rssi = baseline_rssi * 0.995 + current_rssi * 0.005
+        time.sleep(0.1)
+
+worker_thread = threading.Thread(target=wifi_background_worker, daemon=True)
+worker_thread.start()
+time.sleep(0.3)
+with wifi_lock:
+    baseline_rssi = current_rssi
+
+def cycle_mode():
+    global mode_index, current_mode
+    scene_manager.reset_cache()
+    mode_index = (mode_index + 1) % len(modes_list)
+    current_mode = modes_list[mode_index]
+
+def cycle_regional_filter():
+    global regional_mode_index, is_full_connectome
+    if model_loaded_from_csv and neurons_df is not None:
+        if is_full_connectome:
+            is_full_connectome = False
+            regional_mode_index = 0
+        else:
+            regional_mode_index = (regional_mode_index + 1) % len(regional_filters)
+        apply_current_filter()
+
+def toggle_full_connectome():
+    global is_full_connectome
+    if model_loaded_from_csv and (neurons_df is not None or TORCH_AVAILABLE):
+        is_full_connectome = not is_full_connectome
+        apply_current_filter()
+
+def draw_gear_icon(surface, color, center, radius):
+    cx, cy = center
+    pygame.draw.circle(surface, color, center, radius, 2)
+    pygame.draw.circle(surface, color, center, radius // 2, 2)
+    for i in range(8):
+        angle = i * (2 * math.pi / 8)
+        x1 = cx + (radius - 2) * math.cos(angle)
+        y1 = cy + (radius - 2) * math.sin(angle)
+        x2 = cx + (radius + 4) * math.cos(angle)
+        y2 = cy + (radius + 4) * math.sin(angle)
+        pygame.draw.line(surface, color, (x1, y1), (x2, y2), 2)
+
+clock = pygame.time.Clock()
+
+while running:
+    curr_w, curr_h = screen.get_size()
+    screen.fill(BG_COLOR)
+    scale_x, scale_y = curr_w / DEFAULT_W, curr_h / DEFAULT_H
+    min_scale = min(scale_x, scale_y)
+
+    slider_w = int(250 * scale_x)
+    slider_x = curr_w - slider_w - int(30 * scale_x)
+    center = (int(curr_w * 0.32), int(curr_h * 0.46))
+    radar_radius = int(175 * min_scale)
+
+    gear_size = int(28 * min_scale)
+    gear_rect = pygame.Rect(curr_w - gear_size - 10, 10, gear_size, gear_size)
+    mode_btn_rect = pygame.Rect(slider_x, int(15 * scale_y), slider_w, int(32 * scale_y))
+    conn_btn_rect = pygame.Rect(slider_x, int(55 * scale_y), slider_w, int(32 * scale_y))
+    quick_btn_rect = pygame.Rect(slider_x, int(curr_h * 0.69), slider_w, int(34 * scale_y))
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+            pygame.quit()
+            sys.exit()
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_m:
+                cycle_mode()
+            elif event.key == pygame.K_n and model_loaded_from_csv:
+                cycle_regional_filter()
+            elif event.key == pygame.K_f:
+                fullscreen = not fullscreen
+                screen = pygame.display.set_mode((info.current_w, info.current_h) if fullscreen else (DEFAULT_W, DEFAULT_H), get_video_flags(fullscreen, borderless))
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            pos = pygame.mouse.get_pos()
+            if gear_rect.collidepoint(pos):
+                gear_menu_open = not gear_menu_open
+            elif gear_menu_open:
+                gm_w, gm_h = int(330 * scale_x), int(160 * scale_y)
+                gm_x, gm_y = curr_w - gm_w - 10, 45
+                if pygame.Rect(gm_x + 15, gm_y + 40, gm_w - 30, 25).collidepoint(pos):
+                    app_settings["start_fullscreen"] = not app_settings["start_fullscreen"]
+                    save_app_settings(app_settings)
+                elif pygame.Rect(gm_x + 15, gm_y + 70, gm_w - 30, 25).collidepoint(pos):
+                    borderless = not borderless
+                    app_settings["borderless"] = borderless
+                    save_app_settings(app_settings)
+                    screen = pygame.display.set_mode((curr_w, curr_h), get_video_flags(fullscreen, borderless))
+                elif pygame.Rect(gm_x + 15, gm_y + 110, gm_w - 30, 30).collidepoint(pos):
+                    running = False
+                    pygame.quit()
+                    sys.exit()
+                elif not pygame.Rect(gm_x, gm_y, gm_w, gm_h).collidepoint(pos):
+                    gear_menu_open = False
+            elif mode_btn_rect.collidepoint(pos):
+                cycle_mode()
+            elif conn_btn_rect.collidepoint(pos) and model_loaded_from_csv:
+                cycle_regional_filter()
+            elif quick_btn_rect.collidepoint(pos) and model_loaded_from_csv:
+                toggle_full_connectome()
+            else:
+                for s in sliders:
+                    sy = int(curr_h * s["rel_y"])
+                    if slider_x <= pos[0] <= slider_x + slider_w and sy - 15 <= pos[1] <= sy + 25:
+                        active_slider = s
+        elif event.type == pygame.MOUSEBUTTONUP:
+            active_slider = None
+        elif event.type == pygame.MOUSEMOTION and active_slider:
+            pos = pygame.mouse.get_pos()
+            rel_x = max(0, min(slider_w, pos[0] - slider_x))
+            active_slider["val"] = active_slider["min"] + (rel_x / float(slider_w)) * (active_slider["max"] - active_slider["min"])
+
+    if motion_cooldown > 0:
+        motion_cooldown -= 1
+
+    sensitivity = sliders[0]["val"]
+    decay = sliders[1]["val"]
+    noise = sliders[2]["val"]
+    adapt_threshold = sliders[3]["val"]
+
+    with wifi_lock:
+        local_deviation = deviation_metric
+        local_rssi = current_rssi
+        local_baseline = baseline_rssi
+
+    motion_momentum = min(1.0, motion_momentum + 0.35) if local_deviation > 0.025 else max(0.0, motion_momentum - 0.05)
+    base_stimulus = (1.0 - local_rssi) + (local_deviation * 12.0) + (motion_momentum * 2.0)
+
+    sparse_input = np.zeros(NUM_NODES, dtype=np.float32)
+    active_subset = np.random.choice(NUM_NODES, size=max(4, NUM_NODES // (3 if local_deviation > 0.025 else 12)), replace=False)
+    sparse_input[active_subset] = (base_stimulus + random.uniform(0, noise)) * sensitivity
+
+    if is_full_connectome and TORCH_AVAILABLE and isinstance(weights, torch.Tensor):
+        state_tensor = torch.tensor(brain_state, dtype=torch.float32)
+        res = torch.sparse.mm(weights, state_tensor.unsqueeze(1)).squeeze(1)
+        raw_state = res.numpy() * 0.001 + sparse_input + np.random.normal(0, noise * 0.5, NUM_NODES).astype(np.float32)
+    else:
+        raw_state = weights.dot(brain_state) + sparse_input + np.random.normal(0, noise * 0.5, NUM_NODES).astype(np.float32)
+
+    brain_state = np.tanh(raw_state)
+    brain_state[np.abs(brain_state) < 0.35] *= 0.15
+    brain_state *= (1.0 - decay)
+    activity_level = np.mean(np.abs(brain_state))
+
+    if activity_level > 0.35 or motion_momentum > 0.1:
+        if local_deviation > 0.025 or motion_momentum > 0.1:
+            if motion_cooldown == 0:
+                target_angle = random.uniform(0, 6.28)
+                target_dist = random.randint(40, radar_radius - 20)
+                target_x = center[0] + target_dist * np.cos(target_angle)
+                target_y = center[1] + target_dist * np.sin(target_angle)
+                classic_blips.append({
+                    "type": "motion",
+                    "angle": target_angle,
+                    "dist": target_dist,
+                    "life": 180,
+                    "size": 6
+                })
+                motion_cooldown = 12
+
+    # --- RENDER MODES ---
+    if current_mode == "RADAR":
+        radius = radar_radius
+        pygame.draw.circle(screen, RADAR_DARK, center, radius, max(1, int(2 * min_scale)))
+        pygame.draw.circle(screen, RADAR_DARK, center, radius // 2, 1)
+        pygame.draw.line(screen, RADAR_DARK, (center[0]-radius, center[1]), (center[0]+radius, center[1]), 1)
+        pygame.draw.line(screen, RADAR_DARK, (center[0], center[1]-radius), (center[0], center[1]+radius), 1)
+
+        pygame.draw.circle(screen, TEXT_COLOR, center, max(2, int(5 * min_scale)))
+        router_dist = int((radius * 0.8) * (1.0 - local_rssi))
+        rx = center[0] + router_dist * np.cos(router_angle)
+        ry = center[1] + router_dist * np.sin(router_angle)
+        square_size = max(8, int(10 * min_scale))
+        pygame.draw.rect(screen, ROUTER_BLUE, (int(rx) - square_size // 2, int(ry) - square_size // 2, square_size, square_size))
+
+        radar_angle += 0.03
+        tip_x = center[0] + radius * np.cos(radar_angle)
+        tip_y = center[1] + radius * np.sin(radar_angle)
+        pygame.draw.line(screen, RADAR_GREEN, center, (tip_x, tip_y), max(1, int(2 * min_scale)))
+
+        screen.blit(font.render("Classic WiFi Radar Sweep", True, RADAR_GREEN), (int(40 * scale_x), int(40 * scale_y)))
+
+        for blip in classic_blips:
+            blip["life"] -= 3
+            if blip["life"] > 0:
+                bx = center[0] + blip["dist"] * np.cos(blip["angle"])
+                by = center[1] + blip["dist"] * np.sin(blip["angle"])
+                color = ALERT_COLOR if blip["type"] == "motion" else (0, min(255, blip["life"]), int(blip["life"]/2))
+                pygame.draw.circle(screen, color, (int(bx), int(by)), blip["size"])
+
+    elif current_mode == "PS2_GRID":
+        # --- DEDICATED OPTIMIZED VIEW FOR FULL CONNECTOME vs REGIONAL PS2 GRID ---
+        if is_full_connectome:
+            # Optimized 2D Connectome Matrix Heatmap View (Zero Lag for 100k+ Nodes)
+            screen.blit(font.render(f"Optimized Connectome Matrix [{NUM_NODES:,} Nodes Active]", True, ALERT_COLOR), (int(40 * scale_x), int(40 * scale_y)))
+
+            grid_panel_rect = pygame.Rect(int(center[0] - radar_radius * 1.2), int(center[1] - radar_radius * 1.2), int(radar_radius * 2.4), int(radar_radius * 2.4))
+            pygame.draw.rect(screen, (15, 15, 25), grid_panel_rect, border_radius=8)
+            pygame.draw.rect(screen, ALERT_COLOR, grid_panel_rect, 1, border_radius=8)
+
+            # Fast block rendering of active state vector
+            sample_stride = max(1, NUM_NODES // 1600)
+            cols = 40
+            block_size = grid_panel_rect.width // cols
+            for idx, val in enumerate(brain_state[::sample_stride]):
+                if abs(val) > 0.05:
+                    c = idx % cols
+                    r = idx // cols
+                    bx = grid_panel_rect.x + 10 + c * block_size
+                    by = grid_panel_rect.y + 10 + r * block_size
+                    if by < grid_panel_rect.bottom - 10:
+                        intensity = int(min(255, abs(val) * 255))
+                        color = (intensity, 50, 120) if val > 0 else (40, intensity, 180)
+                        pygame.draw.rect(screen, color, (bx, by, max(2, block_size - 1), max(2, block_size - 1)))
+        else:
+            # Standard PS2 3D Memory Grid for Regional Subsets
+            ps2_orbit_angle += 0.008
+            cos_o, sin_o = np.cos(ps2_orbit_angle), np.sin(ps2_orbit_angle)
+            pitch_timer -= 1
+            if pitch_timer <= 0:
+                target_pitch_offset = random.randint(30, 50) * min_scale if random.random() < 0.25 else 0.0
+                pitch_timer = random.randint(350, 600)
+            current_pitch_offset += (target_pitch_offset - current_pitch_offset) * 0.025
+            camera_pitch_arc = (40 * min_scale) + current_pitch_offset
+
+            grid_dim = int(math.ceil(math.sqrt(NUM_NODES)))
+            spacing = max(18, int(35 * min_scale * (6.0 / max(6, grid_dim))))
+            center_3d_x, center_3d_y = center[0], center[1] + int(20 * min_scale)
+
+            screen.blit(font.render(f"PS2 Memory Matrix [{regional_filters[regional_mode_index]['label']} - {NUM_NODES}n]", True, ROUTER_BLUE), (int(40 * scale_x), int(40 * scale_y)))
+
+            max_render_nodes = 600
+            step_stride = max(1, NUM_NODES // max_render_nodes) if NUM_NODES > max_render_nodes else 1
+            max_draw_distance = 350 * min_scale
+
+            projected_pillars = []
+            for i in range(0, NUM_NODES, step_stride):
+                r_idx, c_idx = i // grid_dim, i % grid_dim
+                base_x = (c_idx - grid_dim / 2.0 + 0.5) * spacing
+                base_z = (r_idx - grid_dim / 2.0 + 0.5) * spacing
+                rot_x = base_x * cos_o - base_z * sin_o
+                rot_z = base_x * sin_o + base_z * cos_o
+
+                if rot_z < -100 or rot_z > max_draw_distance:
+                    continue
+
+                neuron_val = float(brain_state[i])
+                normalized_act = max(0.05, min(1.0, (neuron_val + 1.0) * 0.5))
+                pillar_height = int((30 + normalized_act * 90) * min_scale)
+                perspective = (400 * min_scale) / (400 * min_scale + rot_z + 120)
+
+                projected_pillars.append({
+                    "id": i,
+                    "x": center_3d_x + int(rot_x * perspective),
+                    "top_y": center_3d_y + int((camera_pitch_arc - pillar_height) * perspective),
+                    "bot_y": center_3d_y + int(camera_pitch_arc * perspective),
+                    "z": rot_z
+                })
+
+            projected_pillars.sort(key=lambda p: p["z"])
+            box_w = max(3, int(spacing * 0.4 * min_scale))
+            for p in projected_pillars:
+                sx, top_y, bot_y = p["x"], p["top_y"], p["bot_y"]
+                left_x, right_x = sx - box_w // 2, sx + box_w // 2
+                side_poly = [(left_x, bot_y), (right_x, bot_y), (right_x, top_y), (left_x, top_y)]
+                pygame.draw.polygon(screen, (180, 140, 20), side_poly)
+                pygame.draw.polygon(screen, (150, 220, 255), side_poly, 1)
+                cap_poly = [(left_x, top_y), (right_x, top_y), (right_x, top_y + 3), (left_x, top_y + 3)]
+                pygame.draw.polygon(screen, (255, 215, 50), cap_poly)
+
+    elif current_mode == "HALO_RADAR":
+        cx, cy = center
+        r = radar_radius
+        hud_surf_w = r * 2 + int(60 * min_scale)
+        hud_surf_h = r * 2 + int(120 * min_scale)
+        hud_surf = pygame.Surface((hud_surf_w, hud_surf_h), pygame.SRCALPHA)
+        local_cx = hud_surf_w // 2
+        local_cy = hud_surf_h // 2 + int(20 * min_scale)
+
+        bar_w = int(320 * min_scale)
+        bar_h = int(28 * min_scale)
+        corner_cut = int(12 * min_scale)
+        taper_x = int(18 * min_scale)
+        taper_y = int(8 * min_scale)
+        half_w = bar_w / 2.0
+        bar_offset_y = int(22 * min_scale)
+        bar_bottom_y = (local_cy - r) - bar_offset_y
+
+        bar_pts = [
+            (local_cx + half_w - corner_cut, bar_bottom_y - bar_h),
+            (local_cx + half_w, bar_bottom_y - bar_h + corner_cut),
+            (local_cx + half_w, bar_bottom_y - taper_y),
+            (local_cx + half_w - taper_x, bar_bottom_y),
+            (local_cx - half_w + taper_x, bar_bottom_y),
+            (local_cx - half_w, bar_bottom_y - taper_y),
+            (local_cx - half_w, bar_bottom_y - bar_h + corner_cut),
+            (local_cx - half_w + corner_cut, bar_bottom_y - bar_h)
+        ]
+        pygame.draw.polygon(hud_surf, (*H2_HEALTH_BLUE, 200), bar_pts)
+
+        shield_w = int(52 * min_scale)
+        dark_pts = [
+            (local_cx - half_w + corner_cut, bar_bottom_y - bar_h),
+            (local_cx - half_w + shield_w, bar_bottom_y - bar_h),
+            (local_cx - half_w + shield_w, bar_bottom_y),
+            (local_cx - half_w + taper_x, bar_bottom_y),
+            (local_cx - half_w, bar_bottom_y - taper_y),
+            (local_cx - half_w, bar_bottom_y - bar_h + corner_cut)
+        ]
+        pygame.draw.polygon(hud_surf, (*H2_SHIELD_BLUE, 200), dark_pts)
+        pygame.draw.polygon(hud_surf, (*H2_BORDER_BLUE, 220), dark_pts, max(1, int(2 * min_scale)))
+        pygame.draw.polygon(hud_surf, (*H2_BORDER_BLUE, 220), bar_pts, max(1, int(2 * min_scale)))
+
+        pygame.draw.circle(hud_surf, (*H2_BORDER_BLUE, 220), (local_cx, local_cy), r + 2, max(1, int(2 * min_scale)))
+        pygame.draw.circle(hud_surf, (*H2_BASE_LIGHT, 195), (local_cx, local_cy), r)
+
+        wedge_pts = [(local_cx, local_cy)]
+        for a_deg in range(245, 296, 2):
+            rad = math.radians(a_deg)
+            wedge_pts.append((local_cx + r * math.cos(rad), local_cy + r * math.sin(rad)))
+        pygame.draw.polygon(hud_surf, (*H2_WEDGE_DARK, 200), wedge_pts)
+        pygame.draw.circle(hud_surf, (*H2_DARK_INNER, 200), (local_cx, local_cy), int(r * 0.30))
+
+        for i in range(len(pulse_rings)):
+            pulse_rings[i] += 0.006
+            if pulse_rings[i] >= 1.0:
+                pulse_rings[i] = 0.0
+            pr = int(pulse_rings[i] * r)
+            if pr > 2:
+                pygame.draw.circle(hud_surf, (*H2_PULSE_BLUE, 180), (local_cx, local_cy), pr, max(1, int(1 * min_scale)))
+
+        pygame.draw.circle(hud_surf, (*H2_BORDER_BLUE, 240), (local_cx, local_cy), max(2, int(4 * min_scale)))
+        screen.blit(hud_surf, (cx - local_cx, cy - local_cy))
+        screen.blit(font.render("Halo 2 Motion Tracker HUD", True, H2_HEALTH_BLUE), (int(40 * scale_x), int(40 * scale_y)))
+
+        halo_sample_n = min(NUM_NODES, 30)
+        for i in range(halo_sample_n):
+            val = float(brain_state[i])
+            if abs(val) > 0.2:
+                angle_h = (i / float(halo_sample_n)) * (2 * math.pi) + (pygame.time.get_ticks() * 0.0005)
+                dist_h = radar_radius * 0.7 * ((i % 5) / 5.0)
+                bx = center[0] + int(dist_h * np.cos(angle_h))
+                by = center[1] + int(dist_h * np.sin(angle_h))
+                pygame.draw.circle(screen, (255, 220, 30) if val > 0 else (255, 40, 70), (bx, by), 4)
+
+    classic_blips = [b for b in classic_blips if b["life"] > 0]
+
+    # --- UI CONTROLS ---
+    pygame.draw.rect(screen, (35, 90, 150), mode_btn_rect, border_radius=5)
+    screen.blit(font.render(f"VIEW: {current_mode} [Press M]", True, (255, 255, 255)), mode_btn_rect.inflate(-20, -8).topleft)
+
+    conn_label_text = f"Circuit: Full Connectome" if is_full_connectome else (f"Circuit: {regional_filters[regional_mode_index]['label']}" if model_loaded_from_csv else "Circuit: Mock Grid")
+    pygame.draw.rect(screen, (40, 60, 90) if model_loaded_from_csv else (25, 25, 30), conn_btn_rect, border_radius=4)
+    pygame.draw.rect(screen, RADAR_GREEN if model_loaded_from_csv else (60, 60, 70), conn_btn_rect, 1, border_radius=4)
+    screen.blit(font.render(conn_label_text, True, TEXT_COLOR if model_loaded_from_csv else (120, 120, 120)), conn_btn_rect.inflate(-20, -8).topleft)
+
+    for s in sliders:
+        sy = int(curr_h * s["rel_y"])
+        display_val = f"{s['val']:.1f}" if s['name'] != "Adapt Speed" else f"{int(s['val'])}"
+        screen.blit(font.render(f"{s['name']}: {display_val}", True, TEXT_COLOR), (slider_x, sy - 22))
+        pygame.draw.rect(screen, (40, 40, 50), (slider_x, sy, slider_w, 8))
+        val_pct = (s["val"] - s["min"]) / (s["max"] - s["min"])
+        pygame.draw.circle(screen, RADAR_GREEN, (slider_x + int(val_pct * slider_w), sy + 4), max(4, int(7 * min_scale)))
+
+    quick_btn_bg = (140, 35, 90) if is_full_connectome else (40, 40, 55)
+    quick_btn_border = ROUTER_YELLOW if is_full_connectome else (80, 80, 100)
+    pygame.draw.rect(screen, quick_btn_bg if model_loaded_from_csv else (25, 25, 30), quick_btn_rect, border_radius=5)
+    pygame.draw.rect(screen, quick_btn_border if model_loaded_from_csv else (60, 60, 70), quick_btn_rect, 1, border_radius=5)
+    status_tag = "[ON]" if is_full_connectome else "[OFF]"
+    quick_txt = font.render(f"⚡ Full Connectome {status_tag}", True, (255, 255, 255) if is_full_connectome else TEXT_COLOR)
+    screen.blit(quick_txt, quick_txt.get_rect(center=quick_btn_rect.center))
+
+    bottom_y = curr_h - int(160 * scale_y)
+    screen.blit(font.render(f"Signal: {local_rssi:.2f} | Base: {local_baseline:.2f}", True, TEXT_COLOR), (int(40 * scale_x), bottom_y))
+    screen.blit(font.render(f"Status: {'PANIC / SPIKE!' if local_deviation > 0.025 else 'BASELINE STABLE'}", True, ALERT_COLOR if local_deviation > 0.025 else RADAR_GREEN), (int(40 * scale_x), bottom_y + 28))
+    screen.blit(font.render(f"Brain Activity: {activity_level:.3f}", True, ALERT_COLOR if activity_level > 0.35 else TEXT_COLOR), (int(40 * scale_x), bottom_y + 56))
+
+    pygame.draw.rect(screen, (35, 90, 150) if gear_menu_open else (20, 20, 25), gear_rect, border_radius=4)
+    draw_gear_icon(screen, RADAR_GREEN if gear_menu_open else TEXT_COLOR, (gear_rect.x + gear_size // 2, gear_rect.y + gear_size // 2), max(4, int(7 * min_scale)))
+
+    pygame.display.flip()
+    clock.tick(60)
+EOF
+
+echo "[*] Launching updated dashboard..."
+source "$VENV_DIR/bin/activate"
+python3 "$SCRIPT_NAME"
