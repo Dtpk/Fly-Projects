@@ -28,6 +28,10 @@ use cases for the fruit fly connectome others didn't try yet or think of.
 Background rssi values used for person based tracker. I tried this in the past scripting it my self but with the fruit fly connectome added this makes it way more stable and easy to configure cause the fruit fly can judge what is a standard "normal" and react on its own. 
 The one slider adjust its "normal" state I like 10 seconds but you could tweak lower or higher it really depends on the networking tool used and if your hardware can refresh the rssi values fast enough using nmcli. Oh yeah you will need to install nmcli or iw but I might include both version but right now it is for nmcli its output is just cleaner. That and python are the only packages you need for the "fly-Dar" to work.
 
+UPDATE fly-dar-learning version
+
+This one does as it says it can learn some what adjusting the weights then it will fall back after awhile, and it has more node selection choices you can even load the whole thing in a sparce form this is very very un-optimized it lags I will work on it if we can't get a visual it might be dropped for just smooth fps that why the full connectome is its own option. This one isnt as static nor does it use a random selection of neurons unless you tell it.
+
     -- Fly-Manager --
 
 (video place holder)
