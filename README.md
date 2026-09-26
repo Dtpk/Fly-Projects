@@ -52,7 +52,11 @@ This one uses flask for a web interface something I am more use to then pygame s
 Eventually adding a virtual gamepad to the page so you can navigate manually some games might need that I think.
 
 Watch the video to learn more and see them in action!!! "https://www.youtube.com/watch?v=3aTu1EkrrDY"
+    
+    -- Fruit-Fly-Security --
 
+Work in progress but the fruit-fly will only stand guard and track your local phones ip when provided / wifi outages, and do much better motion detection this is really just a dumb personal project for a home server I have and am getting tired of some false positives and having to manually start it. This wasn't in the YouTube video. And this might go through a few changes as I tune which neurons I should use for solid reliability with the camera. Will be released when its released since i'm using this one a lot and have a great baseline now I wanna take my time on this one since it might see daily use.
+    
     -- Special notes --
 
 A heads up I am working on a selector or load as needed method right now it grabs a random 64 nodes for the file manage and the fly-dar the fly-dar will get a fly-dar-learning version which will have a selector letting you use more specific sections "etc" and it will learn and adjust the weights not just be static not sure if this will improve it more but it a start. "central" "motor" "sensory" so on and so forth from 100 to 64 will be select-able perhaps more as I work on it.
