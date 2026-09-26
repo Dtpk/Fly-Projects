@@ -55,7 +55,7 @@ Watch the video to learn more and see them in action!!! "https://www.youtube.com
     
     -- Fruit-Fly-Security --
 
-Work in progress but the fruit-fly will only stand guard and track your local phones ip when provided / wifi outages, and do much better motion detection this is really just a dumb personal project for a home server I have and am getting tired of some false positives and having to manually start it. This wasn't in the YouTube video. And this might go through a few changes as I tune which neurons I should use for solid reliability with the camera. Will be released when its released since i'm using this one a lot and have a great baseline now I wanna take my time on this one since it might see daily use.
+Work in progress but the fruit-fly will only stand guard and track your local phones ip when provided / wifi outages if it sees a issue with either camera will kick on and track, it will also do much better motion detection this is really just a dumb personal project for a home server I have and am getting tired of some false positives and having to manually start it. This wasn't in the YouTube video. And this might go through a few changes as I tune which neurons I should use for solid reliability with the camera. Will be released when its released since i'm using this one a lot and have a great baseline now I wanna take my time on this one since it might see daily use.
     
     -- Special notes --
 
