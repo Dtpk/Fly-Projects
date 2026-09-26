@@ -1,0 +1,323 @@
+#!/usr/bin/env bash
+set -e
+
+# This can be self hosted and port-fowarded by default you can access it locally. Set your device ip and router ip
+# Set the threasholds as needed and leave it run. This was set up for my older home server so something will need to be tweaked im sure
+# For better systems.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+VENV_DIR="$SCRIPT_DIR/fly_security_env"
+SCRIPT_NAME="$SCRIPT_DIR/fly_security_server.py"
+NUMPY_MODEL="$SCRIPT_DIR/brain_matrix_cache.npz"
+PRINCETON_CONN="$SCRIPT_DIR/connections_princeton.csv"
+PRINCETON_CONN_GZ="$SCRIPT_DIR/connections_princeton.csv.gz"
+TARGET_IMG_DIR="$SCRIPT_DIR/SECURITYcam/"
+
+echo "=== Fruit Fly Brain Connectome Security Sentinel ==="
+
+# Step 1: Create Target Image Directory
+mkdir -p "$TARGET_IMG_DIR"
+echo "[+] Target image directory verified: $TARGET_IMG_DIR"
+
+# Step 2: Virtual Environment Setup (Pinning NumPy < 2 for CPU instruction safety)
+if [ ! -d "$VENV_DIR" ]; then
+    echo "[!] Setting up virtual environment..."
+    python3 -m venv "$VENV_DIR"
+    source "$VENV_DIR/bin/activate"
+    echo "[*] Installing CPU-safe dependencies..."
+    pip install --no-cache-dir --upgrade pip
+    pip install --no-cache-dir "numpy<2" pandas scipy opencv-python flask
+    deactivate
+    echo "[+] Setup complete!"
+else
+    echo "[*] Existing environment found."
+fi
+
+# Step 3: Compatible Matrix Cache Generation (100% PyTorch & AVX2 crash-free)
+if [ ! -f "$NUMPY_MODEL" ]; then
+    source "$VENV_DIR/bin/activate"
+    python3 - << 'EOF_CONVERT'
+import os
+import pandas as pd
+import numpy as np
+import scipy.sparse as sp
+import glob
+
+
+#This is the node choice perhaps a picker at one point right now it selects 1,000 random neurons from the fly.
+
+NUM_NODES = 1000
+numpy_model_path = "brain_matrix_cache.npz"
+
+print("[*] Generating CPU-safe SciPy sparse matrix cache...")
+src_files = glob.glob('connections_princeton.csv*')
+if src_files:
+    SRC_FILE = src_files[0]
+    print(f"[*] Building sparse matrix directly from {SRC_FILE}...")
+    try:
+        df = pd.read_csv(SRC_FILE, low_memory=False)
+        src_col = 'pre_root_id' if 'pre_root_id' in df.columns else df.columns[0]
+        dst_col = 'post_root_id' if 'post_root_id' in df.columns else df.columns[1]
+        weight_col = 'synapse_count' if 'synapse_count' in df.columns else (df.columns[2] if len(df.columns) > 2 else None)
+
+        unique_nodes = pd.unique(df[[src_col, dst_col]].values.ravel())
+        id_to_idx = {nid: i for i, nid in enumerate(unique_nodes)}
+
+        srcs = df[src_col].map(id_to_idx).to_numpy()
+        dsts = df[dst_col].map(id_to_idx).to_numpy()
+        weights = pd.to_numeric(df[weight_col], errors='coerce').fillna(1.0).to_numpy(dtype=np.float32) if weight_col else np.ones(len(df), dtype=np.float32)
+
+        valid = ~np.isnan(srcs) & ~np.isnan(dsts)
+        mat = sp.coo_matrix((weights[valid], (srcs[valid], dsts[valid])), shape=(len(unique_nodes), len(unique_nodes)), dtype=np.float32).tocsr()
+        if mat.shape[0] > NUM_NODES:
+            mat = mat[:NUM_NODES, :NUM_NODES]
+        sp.save_npz(numpy_model_path, mat)
+        print("[+] NumPy/SciPy sparse matrix cache created from CSV!")
+    except Exception as e:
+        print(f"[!] CSV parsing error ({e}), generating random fallback...")
+        mat = sp.random(NUM_NODES, NUM_NODES, density=0.1, format='csr', dtype=np.float32) * 0.3
+        sp.save_npz(numpy_model_path, mat)
+else:
+    print("[*] No CSV found, generating random fallback sparse matrix...")
+    mat = sp.random(NUM_NODES, NUM_NODES, density=0.1, format='csr', dtype=np.float32) * 0.3
+    sp.save_npz(numpy_model_path, mat)
+EOF_CONVERT
+    deactivate
+else
+    echo "[*] Precompiled SciPy matrix cache found. Skipping conversion."
+fi
+
+# Step 4: Write Flask Web Server & Sentinel Background Engine
+echo "[*] Writing web control server script $SCRIPT_NAME..."
+cat << EOF > "$SCRIPT_NAME"
+import os
+import time
+import threading
+import subprocess
+import json
+import cv2
+import numpy as np
+import scipy.sparse as sp
+from flask import Flask, render_template_string, request, redirect, url_for
+
+app = Flask(__name__)
+SETTINGS_FILE = "security_settings.json"
+TARGET_DIR = "$TARGET_IMG_DIR"
+
+DEFAULT_SETTINGS = {
+    "phone_ip": "",
+    "router_ip": "192.168.1.1",
+    "min_brightness": 40,
+    "motion_threshold": 25.0,
+    "use_full_connectome": True
+}
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r") as f:
+                s = json.load(f)
+                DEFAULT_SETTINGS.update(s)
+        except Exception:
+            pass
+    return DEFAULT_SETTINGS
+
+def save_settings(s):
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(s, f, indent=4)
+
+settings = load_settings()
+
+NUM_NODES = 1000
+connectome_matrix = None
+try:
+    if os.path.exists("brain_matrix_cache.npz"):
+        connectome_matrix = sp.load_npz("brain_matrix_cache.npz").tocsr()
+        if connectome_matrix.shape[0] != NUM_NODES:
+            connectome_matrix = connectome_matrix[:NUM_NODES, :NUM_NODES]
+        print("[+] SciPy connectome matrix loaded successfully for biological motion filtration.")
+except Exception as e:
+    print(f"[!] Matrix load fallback notice: {e}")
+
+if connectome_matrix is None:
+    connectome_matrix = sp.random(NUM_NODES, NUM_NODES, density=0.1, format='csr', dtype=np.float32) * 0.3
+
+brain_state = np.zeros(NUM_NODES, dtype=np.float32)
+
+def process_brain_activity(sensor_vector):
+    global brain_state
+    mapped = np.zeros(NUM_NODES, dtype=np.float32)
+    limit = min(len(sensor_vector), NUM_NODES)
+    mapped[:limit] = sensor_vector[:limit]
+
+    raw = connectome_matrix.dot(brain_state) + mapped
+    brain_state = np.tanh(raw)
+    return float(np.mean(np.abs(brain_state)))
+
+sentinel_status = {
+    "wifi_online": True,
+    "phone_detected": False,
+    "last_snapshot": "None",
+    "activity_score": 0.0,
+    "running": True
+}
+
+def ping_host(ip):
+    if not ip or ip.strip() == "":
+        return False
+    try:
+        ret = subprocess.call(["ping", "-c", "1", "-W", "1", ip], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return ret == 0
+    except Exception:
+        return False
+
+def sentinel_loop():
+    global sentinel_status
+    cap = None
+    prev_gray = None
+
+    while sentinel_status["running"]:
+        current_settings = load_settings()
+        phone_ip = current_settings.get("phone_ip", "").strip()
+        router_ip = current_settings.get("router_ip", "192.168.1.1")
+
+        wifi_ok = ping_host(router_ip)
+        phone_present = ping_host(phone_ip) if phone_ip else False
+
+        sentinel_status["wifi_online"] = wifi_ok
+        sentinel_status["phone_detected"] = phone_present
+
+        if phone_ip and phone_present:
+            if cap is not None:
+                cap.release()
+                cap = None
+            time.sleep(2.0)
+            continue
+
+        should_activate_camera = (not wifi_ok) or (wifi_ok and phone_ip and not phone_present) or (wifi_ok and not phone_ip)
+
+        if should_activate_camera:
+            if cap is None or not cap.isOpened():
+                cap = cv2.VideoCapture(0)
+                time.sleep(1.0)
+
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret:
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    gray = cv2.resize(gray, (32, 32))
+
+                    avg_brightness = np.mean(gray)
+                    if avg_brightness < current_settings.get("min_brightness", 40):
+                        prev_gray = gray
+                        time.sleep(0.5)
+                        continue
+
+                    if prev_gray is not None:
+                        diff = cv2.absdiff(gray, prev_gray)
+                        motion_score = np.mean(diff)
+
+                        sensor_vec = diff.flatten() / 255.0
+                        brain_activation = process_brain_activity(sensor_vec)
+                        sentinel_status["activity_score"] = brain_activation
+
+                        if motion_score > current_settings.get("motion_threshold", 25.0) and brain_activation > 0.15:
+                            timestamp = time.strftime("%Y%m%d-%H%M%S")
+                            filename = f"snapshot_{timestamp}.jpg"
+                            filepath = os.path.join(TARGET_DIR, filename)
+                            cv2.imwrite(filepath, frame)
+                            sentinel_status["last_snapshot"] = filename
+                            print(f"[!] Security Event Triggered! Snapshot saved: {filename}")
+                            time.sleep(3.0)
+
+                    prev_gray = gray
+        else:
+            if cap is not None:
+                cap.release()
+                cap = None
+
+        time.sleep(0.5)
+
+    if cap is not None:
+        cap.release()
+
+t = threading.Thread(target=sentinel_loop, daemon=True)
+t.start()
+
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fly Connectome Security Sentinel</title>
+    <style>
+        body { font-family: sans-serif; background: #0f0f14; color: #d0d0d0; margin: 0; padding: 20px; }
+        .container { max-width: 650px; margin: auto; background: #1a1a24; padding: 25px; border-radius: 8px; border: 1px solid #333; }
+        h1 { color: #00ff80; font-size: 22px; }
+        .status-box { background: #252535; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
+        label { display: block; margin-top: 10px; font-weight: bold; color: #88ccff; }
+        input[type="text"] { width: 100%; padding: 8px; margin-top: 5px; background: #101018; border: 1px solid #444; color: #fff; border-radius: 4px; }
+        button { margin-top: 15px; background: #00ff80; color: #000; border: none; padding: 10px 20px; font-weight: bold; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #00cc66; }
+        .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .bg-green { background: #006633; color: #00ff80; }
+        .bg-red { background: #660022; color: #ff4466; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Fly Brain Security Sentinel Dashboard</h1>
+        <div class="status-box">
+            <p><b>WiFi Gateway Status:</b> <span class="badge {% if status.wifi_online %}bg-green{% else %}bg-red{% endif %}">{% if status.wifi_online %}ONLINE{% else %}OFFLINE (Fallback Active){% endif %}</span></p>
+            <p><b>Phone Presence:</b> <span class="badge {% if status.phone_detected %}bg-green{% else %}bg-red{% endif %}">{% if status.phone_detected %}HOME (Camera Off){% else %}AWAY (Sentinel Armed){% endif %}</span></p>
+            <p><b>Brain Activity Filter:</b> {{ "%.4f"|format(status.activity_score) }}</p>
+            <p><b>Last Snapshot:</b> {{ status.last_snapshot }}</p>
+        </div>
+
+        <form method="POST">
+            <label>Phone IP Address (Leave blank to disable phone tracking):</label>
+            <input type="text" name="phone_ip" value="{{ settings.phone_ip }}">
+
+            <label>Router / Gateway IP:</label>
+            <input type="text" name="router_ip" value="{{ settings.router_ip }}">
+
+            <label>Minimum Brightness Filter (0-255):</label>
+            <input type="text" name="min_brightness" value="{{ settings.min_brightness }}">
+
+            <label>Motion Threshold:</label>
+            <input type="text" name="motion_threshold" value="{{ settings.motion_threshold }}">
+
+            <button type="submit">Save Settings</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    global settings
+    if request.method == "POST":
+        settings["phone_ip"] = request.form.get("phone_ip", "").strip()
+        settings["router_ip"] = request.form.get("router_ip", "192.168.1.1").strip()
+        try:
+            settings["min_brightness"] = int(request.form.get("min_brightness", 40))
+            settings["motion_threshold"] = float(request.form.get("motion_threshold", 25.0))
+        except ValueError:
+            pass
+        save_settings(settings)
+        return redirect(url_for('index'))
+    return render_template_string(HTML_TEMPLATE, status=sentinel_status, settings=settings)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False)
+EOF
+
+# Step 5: Launch Web Server cleanly
+echo "[*] Activating virtual environment and launching security web server..."
+source "$VENV_DIR/bin/activate"
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+python3 "$SCRIPT_NAME"
+deactivate
