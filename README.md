@@ -64,6 +64,14 @@ Since it will be tuned for biological motion cues it does more structural patter
 3 days of testing now and it has been great much less images then my old system so to say the fly neurons benefit in a security motion cam type project is a under statement. I might add a toggle for on-screen time stamps in the images my old thing had that this one currently only time stamps the file. My real setup parses the images into a server that displays the latest 3 images but since it takes so few only when motion happens had not needed the time stamps really on screen. 
 
 If you want the webpage it host to display the images so you can self host that let me know but it really just a interactive settings portal at the moment.
+
+    --Fly-Dreamer-- "Deep Dream Effects"
+
+This is no where near done but initial testing shows you can kinda use this like a untrained deep dream process that will use less hardware to achieve a deep dreamed effect. You provide it a reference image folder or source or you can drag and drop into the terminal too but it has a config. 
+
+Any way the idea is if you put the source and reference folders in the config you can easy turn a video into deep dream "fly dreamed" monsters which is normally resource intensive through other means. 
+
+The reference folder can have anything mac and cheese toilets flys planes etc... and that is all the fly neurons are allowed to see and will reconstruct the image in the source folder with those reference images in mind to a output folder. This might be a lot of fun and I may use it for a video intro unlike with deep dreaming it would take me too long too do something similar.
     
     -- Special notes --
 
