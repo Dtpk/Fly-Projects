@@ -65,13 +65,6 @@ Since it will be tuned for biological motion cues it does more structural patter
 
 If you want the webpage it host to display the images so you can self host that let me know but it really just a interactive settings portal at the moment.
 
-    --Fly-Dreamer-- "Deep Dream Effects"
-
-This is no where near done but initial testing shows you can kinda use this like a untrained deep dream process that will use less hardware to achieve a deep dreamed effect. You provide it a reference image folder or source or you can drag and drop into the terminal too but it has a config. 
-
-Any way the idea is if you put the source and reference folders in the config you can easy turn a video into deep dream "fly dreamed" monsters which is normally resource intensive through other means. 
-
-The reference folder can have anything mac and cheese toilets flys planes etc... and that is all the fly neurons are allowed to see and will reconstruct the image in the source folder with those reference images in mind to a output folder. This might be a lot of fun and I may use it for a video intro unlike with deep dreaming it would take me too long too do something similar while this I can do it with ease.
     
     -- Special notes --
 
