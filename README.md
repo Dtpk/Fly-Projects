@@ -56,9 +56,14 @@ Watch the video to learn more and see them in action!!! "https://www.youtube.com
     -- Fruit-Fly-Security --
 
 (video place holder)
+
 Work in progress but the fruit-fly will only stand guard and track your local phones ip when provided / wifi outages if it sees a issue with either the camera will kick on and track, it will also do much better motion detection this is really just a dumb personal project for a home server I have and am getting tired of some false positives from light shifts with sun and shadows through the window and having to manually start it. This wasn't in the YouTube video. And this might go through a few changes as I tune which neurons I should use for solid reliability with the camera. Will be released when its released since i'm using this one a lot and have a great baseline now I wanna take my time on this one since it might see daily use.
 
 Since it will be tuned for biological motion cues it does more structural pattern recognition then looking for slight pixel shifts. Initial testing has been good on this relatively slow home server I have it running on but I had to provide it the file since it's too bad of a system to do the full initial setup. 
+
+3 days of testing now and it has been great much less images then my old system so to say the fly neurons benefit in a security motion cam type project is a under statement. I might add a toggle for on-screen time stamps in the images my old thing had that this one currently only time stamps the file. My real setup parses the images into a server that displays the latest 3 images but since it takes so few only when motion happens had not needed the time stamps really on screen. 
+
+If you want the webpage it host to display the images so you can self host that let me know but it really just a interactive settings portal at the moment.
     
     -- Special notes --
 
