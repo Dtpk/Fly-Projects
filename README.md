@@ -76,7 +76,7 @@ Instead of 4 instances its one instance of 4 different sections they pause betwe
 
 As you play they will learn to bluff more or less after so many games the weights reset back to the defaults if the real .csv brain connectome is provided. If you provide a fly.png it can use it instead of the blue squares for the flys dice count.
 
-Background I like to do this in my terminal a lot my old script for the terminal couldn't learn so adapted it with the fly and made it a pygame instead so I can eventually convert this too a .appimage if needed. But you still need to provide the fly .csv files for a true experience it should still have the fall back mock brain but I haven't tried it.
+Background I like to do this in my terminal a lot my old script for the terminal couldn't learn so adapted it with the fly and made it a pygame instead so I can eventually convert this too a .appimage if needed. But you still need to provide the fly .csv files for a true experience it should still have the fall back mock brain but I haven't tried it much but it seems alright.
 
 It will make 2 files and a venv one json for the learning and another for a quick config symmetric is the default with 5 dice and 4 flies you can set the dice mode to random then instead of starting with 5 dice everyone gets a random set.
 
