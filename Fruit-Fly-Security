@@ -4,6 +4,10 @@ set -e
 # This can be self hosted and port-fowarded by default you can access it locally. Set your device ip and router ip
 # Set the threasholds as needed and leave it run. This was set up for my older home server so something will need to be tweaked im sure
 # For better systems.
+# New image viewer it can have a live view added at some point but if you refresh the page after a trigger you can look
+# At tha captured images from the web ui making it perfect for a self hosted thing although I suggest adding a password page
+# If you plan to go and put this online my advice.
+
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -90,7 +94,7 @@ fi
 
 # Step 4: Write Flask Web Server & Sentinel Background Engine
 echo "[*] Writing web control server script $SCRIPT_NAME..."
-cat << EOF > "$SCRIPT_NAME"
+cat << 'EOF' > "$SCRIPT_NAME"
 import os
 import time
 import threading
@@ -99,11 +103,11 @@ import json
 import cv2
 import numpy as np
 import scipy.sparse as sp
-from flask import Flask, render_template_string, request, redirect, url_for
+from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory
 
 app = Flask(__name__)
 SETTINGS_FILE = "security_settings.json"
-TARGET_DIR = "$TARGET_IMG_DIR"
+TARGET_DIR = f"{os.path.dirname(os.path.abspath(__file__))}/SECURITYcam/"
 
 DEFAULT_SETTINGS = {
     "phone_ip": "",
@@ -257,11 +261,16 @@ HTML_TEMPLATE = """
         .status-box { background: #252535; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
         label { display: block; margin-top: 10px; font-weight: bold; color: #88ccff; }
         input[type="text"] { width: 100%; padding: 8px; margin-top: 5px; background: #101018; border: 1px solid #444; color: #fff; border-radius: 4px; }
-        button { margin-top: 15px; background: #00ff80; color: #000; border: none; padding: 10px 20px; font-weight: bold; border-radius: 4px; cursor: pointer; }
-        button:hover { background: #00cc66; }
+        button, .nav-btn { margin-top: 10px; background: #00ff80; color: #000; border: none; padding: 8px 15px; font-weight: bold; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; font-size: 14px;}
+        button:hover, .nav-btn:hover { background: #00cc66; }
+        .nav-btn { background: #334455; color: #fff; margin-right: 5px; }
+        .nav-btn:hover { background: #445566; }
+        .nav-btn.disabled { background: #1c222b; color: #556070; cursor: not-allowed; pointer-events: none; }
         .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
         .bg-green { background: #006633; color: #00ff80; }
         .bg-red { background: #660022; color: #ff4466; }
+        .snapshot-preview { text-align: center; margin-top: 10px; }
+        .snapshot-preview img { max-width: 100%; height: auto; border-radius: 4px; border: 1px solid #444; }
     </style>
 </head>
 <body>
@@ -272,6 +281,25 @@ HTML_TEMPLATE = """
             <p><b>Phone Presence:</b> <span class="badge {% if status.phone_detected %}bg-green{% else %}bg-red{% endif %}">{% if status.phone_detected %}HOME (Camera Off){% else %}AWAY (Sentinel Armed){% endif %}</span></p>
             <p><b>Brain Activity Filter:</b> {{ "%.4f"|format(status.activity_score) }}</p>
             <p><b>Last Snapshot:</b> {{ status.last_snapshot }}</p>
+        </div>
+
+        <div class="status-box">
+            <h3>📸 Timeline Snapshot Viewer</h3>
+            {% if current_image %}
+                <div class="snapshot-preview">
+                    <img src="{{ url_for('serve_image', filename=current_image) }}" alt="Security Snapshot">
+                </div>
+                <p style="text-align: center; font-size: 13px; color: #aaa; margin: 8px 0;">
+                    Viewing: <b>{{ current_image }}</b> (Item {{ curr_index + 1 }} of {{ images|length }})
+                </p>
+                <div style="text-align: center;">
+                    <a href="{{ url_for('index', index=0) }}" class="nav-btn {% if curr_index == 0 %}disabled{% endif %}">⏮ Latest</a>
+                    <a href="{{ url_for('index', index=curr_index+1) }}" class="nav-btn {% if curr_index >= images|length - 1 %}disabled{% endif %}">◀ Older</a>
+                    <a href="{{ url_for('index', index=curr_index-1) }}" class="nav-btn {% if curr_index <= 0 %}disabled{% endif %}">Newer ▶</a>
+                </div>
+            {% else %}
+                <p style="color: #888; text-align: center;">No snapshots captured yet.</p>
+            {% endif %}
         </div>
 
         <form method="POST">
@@ -294,6 +322,10 @@ HTML_TEMPLATE = """
 </html>
 """
 
+@app.route("/images/<path:filename>")
+def serve_image(filename):
+    return send_from_directory(TARGET_DIR, filename)
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     global settings
@@ -307,7 +339,33 @@ def index():
             pass
         save_settings(settings)
         return redirect(url_for('index'))
-    return render_template_string(HTML_TEMPLATE, status=sentinel_status, settings=settings)
+
+    images = []
+    if os.path.exists(TARGET_DIR):
+        files = [f for f in os.listdir(TARGET_DIR) if f.startswith("snapshot_") and f.endswith(".jpg")]
+        files.sort(key=lambda x: os.path.getmtime(os.path.join(TARGET_DIR, x)), reverse=True)
+        images = files
+
+    try:
+        curr_index = int(request.args.get("index", 0))
+    except ValueError:
+        curr_index = 0
+
+    if images:
+        curr_index = max(0, min(curr_index, len(images) - 1))
+        current_image = images[curr_index]
+    else:
+        current_image = None
+        curr_index = 0
+
+    return render_template_string(
+        HTML_TEMPLATE, 
+        status=sentinel_status, 
+        settings=settings, 
+        images=images, 
+        curr_index=curr_index, 
+        current_image=current_image
+    )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
