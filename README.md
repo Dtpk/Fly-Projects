@@ -63,7 +63,7 @@ Since it will be tuned for biological motion cues it does more structural patter
 
 3 days of testing now and it has been great much less images then my old system so to say the fly neurons benefit in a security motion cam type project is a under statement. I might add a toggle for on-screen time stamps in the images my old thing had that this one currently only time stamps the file. My real setup parses the images into a server that displays the latest 3 images but since it takes so few only when motion happens had not needed the time stamps really on screen. 
 
-If you want the webpage it host to display the images so you can self host that let me know but it really just a interactive settings portal at the moment.
+So this is more then a interactive settings portal now it includes a preview. It's not a live preview yet but when a new image is in or captured reload the page and you will see it. I can make it update live as soon as a picture is taken at some point but right now pretty happy with it.
 
 
     -- Fly-Liar--
